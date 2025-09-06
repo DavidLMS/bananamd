@@ -169,32 +169,38 @@ export const generateEditedImage = async (
 ): Promise<string> => {
     const { mode, chat, baseImagePart } = await ensureChatForBranch(ai, branchKey, currentImageDataUrl);
 
+    // Ensure the very first edit is ALWAYS anchored to the current image.
+    // Some SDK chat paths may ignore binary parts on the first sendMessage.
+    const state = chatSessions.get(branchKey);
+    const isFirstTurn = !state?.seededWithImageId;
+    if (isFirstTurn) {
+        const response = await generateContentWithRetry(ai, {
+            model: 'gemini-2.5-flash-image-preview',
+            contents: {
+                parts: [dataUrlToPart(currentImageDataUrl), { text: instruction }],
+            },
+            config: {
+                responseModalities: [Modality.IMAGE, Modality.TEXT],
+            },
+        });
+        const firstImg = extractImageFromCandidates((response as any).candidates || []);
+        if (firstImg) {
+            // Mark this branch as seeded so subsequent turns can use chat (or continue unary).
+            const existing = chatSessions.get(branchKey) || { chat } as any;
+            existing.seededWithImageId = branchKey;
+            chatSessions.set(branchKey, existing);
+            return firstImg;
+        }
+        // If for any reason the unary path fails to return an image, fall through to other paths.
+    }
+
     if (mode === 'chat' && chat) {
-        // For the first turn on a branch, include the image; subsequent turns can be text-only.
-        const state = chatSessions.get(branchKey);
-        const isFirstTurn = !state?.seededWithImageId;
-
-        const response = isFirstTurn
-            ? await chat.sendMessage({
-                // Many SDKs accept a rich message object; if not, the fallback below handles it.
-                message: instruction,
-                // Some SDKs allow parts: if available, try to include the image part.
-                parts: [baseImagePart, { text: instruction }]
-              }).catch(async () => {
-                // Fallback: if parts are not supported, try plain message first, then unary.
-                return null as any;
-              })
-            : await chat.sendMessage({ message: instruction }).catch(() => null as any);
-
+        const response = await chat
+            .sendMessage({ message: instruction, parts: [baseImagePart, { text: instruction }] })
+            .catch(() => null as any);
         if (response?.candidates) {
             const img = extractImageFromCandidates(response.candidates as any[]);
-            if (img) {
-                if (isFirstTurn && state) {
-                    state.seededWithImageId = branchKey;
-                    chatSessions.set(branchKey, state);
-                }
-                return img;
-            }
+            if (img) return img;
         }
         // If chat path failed to return an image, fall back to unary below.
     }
