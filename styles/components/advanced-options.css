@@ -1,0 +1,105 @@
+.advanced-options {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  overflow: hidden;
+  background-color: var(--background-color);
+  transition: border-color 0.2s ease;
+}
+
+.advanced-options-toggle {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  padding: 1rem 1.5rem;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--dark-text);
+  transition: background-color 0.2s ease, border-color 0.4s ease;
+}
+
+.advanced-options-toggle:hover {
+  background-color: rgba(0,0,0,0.02);
+}
+
+.advanced-options-toggle[aria-expanded="true"] {
+   border-bottom-color: var(--border-color);
+}
+
+.chevron-icon {
+  stroke: var(--light-text);
+  transition: transform 0.3s ease-in-out;
+}
+
+.advanced-options-toggle:hover .chevron-icon {
+    stroke: var(--dark-text);
+}
+
+.chevron-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.advanced-options-content {
+  background-color: var(--card-background);
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease-out, padding 0.4s ease-out;
+  padding: 0 1.5rem;
+}
+
+.advanced-options-content.show {
+  max-height: 500px;
+  padding: 1.5rem;
+}
+
+.options {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 1.5rem;
+  margin-bottom: 0;
+}
+
+.checkbox-container {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: var(--dark-text);
+}
+
+.checkbox-container input {
+  display: none;
+}
+
+.checkbox-custom {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 4px;
+  margin-right: 0.75rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.checkbox-custom .tick {
+  display: none;
+  width: 12px;
+  height: 12px;
+}
+
+.checkbox-container input:checked + .checkbox-custom {
+  background-color: var(--banana-yellow);
+  border-color: var(--banana-yellow);
+}
+
+.checkbox-container input:checked + .checkbox-custom .tick {
+  display: block;
+}

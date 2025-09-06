@@ -1,0 +1,52 @@
+.spinner-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.spinner {
+  border: 4px solid var(--disabled-bg);
+  border-top: 4px solid var(--banana-yellow);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+.inline-spinner {
+  border: 2px solid var(--disabled-bg);
+  border-top: 2px solid var(--banana-yellow);
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+.generation-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.generation-status-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--dark-text);
+  padding: 0.5rem 0;
+}
+
+.generation-status-indicator.final-status {
+    color: var(--success-green);
+}
+
+.generation-status-indicator.final-status .tick {
+    width: 20px;
+    height: 20px;
+    stroke: var(--success-green);
+}

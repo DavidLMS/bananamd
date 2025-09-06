@@ -1,0 +1,97 @@
+:root {
+  --banana-yellow: #FFD700;
+  --pale-yellow: #FFFACD;
+  --dark-text: #212529;
+  --light-text: #6c757d;
+  --border-color: #dee2e6;
+  --background-color: #f7f8fa;
+  --card-background: #ffffff;
+  --disabled-bg: #e9ecef;
+  --disabled-text: #6c757d;
+  --error-red: #e53e3e;
+  --pale-red: #fff5f5;
+  --success-green: #2f855a;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--background-color);
+  color: var(--dark-text);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+.app-container {
+  width: 100%;
+  max-width: 800px;
+  background-color: var(--card-background);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  padding: 2.5rem;
+  text-align: center;
+}
+
+header {
+  margin-bottom: 2rem;
+}
+
+h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+header p {
+  font-size: 1.1rem;
+  color: var(--light-text);
+  margin-top: 0.5rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1.5rem;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+  
+  header p {
+    font-size: 1rem;
+  }
+
+  .advanced-options-toggle {
+    padding: 1rem;
+  }
+
+  .advanced-options-content.show {
+    padding: 1.5rem 1rem;
+  }
+
+  .generated-images-container, .existing-image-container {
+      flex-direction: column;
+  }
+
+  .modal-content {
+      padding: 1.5rem;
+  }
+}
