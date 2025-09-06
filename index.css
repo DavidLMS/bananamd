@@ -243,6 +243,7 @@ header p {
   display: flex;
   justify-content: center;
   align-items: center;
+  margin-top: 2rem;
 }
 
 .propose-button {
@@ -285,6 +286,16 @@ header p {
   animation: spin 1s linear infinite;
 }
 
+.inline-spinner {
+  border: 2px solid var(--disabled-bg);
+  border-top: 2px solid var(--banana-yellow);
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
 .generation-step {
   display: flex;
   flex-direction: column;
@@ -292,11 +303,123 @@ header p {
   width: 100%;
 }
 
+.results-section {
+  text-align: left;
+  margin-top: 1.5rem;
+}
+
+.results-summary {
+    background: var(--background-color);
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+}
+
 .progress-indicator {
   margin: 0;
-  margin-bottom: 1rem;
+  padding: 0.25rem 0;
   font-size: 1rem;
   font-weight: 500;
+  color: var(--dark-text);
+  text-align: center;
+}
+
+.image-reference-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.image-reference-item {
+  background-color: var(--card-background);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  transition: background-color 0.2s ease;
+}
+
+.image-reference-item.status-existing {
+  background-color: #f8f9fa;
+  border-left: 4px solid var(--light-text);
+}
+
+.image-reference-item.status-to-generate {
+  border-left: 4px solid var(--banana-yellow);
+}
+
+.item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.item-path {
+  font-weight: 600;
+  color: var(--dark-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80%;
+  padding-right: 1rem;
+}
+
+.item-line {
+  font-size: 0.8rem;
+  font-weight: 500;
+  background-color: var(--disabled-bg);
+  color: var(--disabled-text);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.item-alt {
+  font-style: italic;
+  color: var(--light-text);
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.item-body {
+    min-height: 20px;
+}
+
+.status-text {
+    font-size: 0.9rem;
+    color: var(--light-text);
+    margin: 0;
+}
+
+.loading-prompts {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--light-text);
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.proposed-prompts {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.prompt-option {
+  border-left: 2px solid var(--border-color);
+  padding-left: 1rem;
+}
+
+.prompt-option strong {
+  font-size: 0.9rem;
+  color: var(--dark-text);
+}
+
+.prompt-option p {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
   color: var(--dark-text);
 }
 

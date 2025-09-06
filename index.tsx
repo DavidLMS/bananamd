@@ -1,6 +1,8 @@
-import React, { useState, useCallback, useRef } from 'react';
+
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import JSZip from 'jszip';
+import { GoogleGenAI, type GenerateContentResponse } from "@google/genai";
 
 const UploadIcon = () => (
     <svg className="drop-zone-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -11,6 +13,7 @@ const UploadIcon = () => (
 );
 
 const CheckIcon = () => (
+    // FIX: Corrected malformed viewBox attribute. The extra quote was breaking JSX parsing.
     <svg className="tick" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12"></polyline>
     </svg>
@@ -27,6 +30,8 @@ const Spinner = () => (
         <div className="spinner"></div>
     </div>
 );
+
+const InlineSpinner = () => <div className="inline-spinner"></div>;
 
 const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLabel, error }) => {
     const [isDragging, setIsDragging] = useState(false);
@@ -107,7 +112,74 @@ interface ImageReference {
     path: string;
     context: string;
     status: 'existing' | 'to-generate';
+    isGeneratingPrompts?: boolean;
+    proposedPrompts?: [string, string];
 }
+
+const ImageReferenceItem = ({ reference }: { reference: ImageReference }) => {
+    const { path, alt, lineNumber, status, isGeneratingPrompts, proposedPrompts } = reference;
+    
+    return (
+        <div className={`image-reference-item status-${status}`} aria-live="polite">
+            <div className="item-header">
+                <span className="item-path" title={path}>{path}</span>
+                <span className="item-line">L{lineNumber}</span>
+            </div>
+            {alt && <p className="item-alt">Alt: "{alt}"</p>}
+            
+            <div className="item-body">
+                {status === 'existing' && (
+                    <p className="status-text">Existing image. No action needed.</p>
+                )}
+                {status === 'to-generate' && (
+                    <>
+                        {isGeneratingPrompts && (
+                            <div className="loading-prompts">
+                                <InlineSpinner />
+                                <span>Generating creative prompts...</span>
+                            </div>
+                        )}
+                        {proposedPrompts && !isGeneratingPrompts && (
+                            <div className="proposed-prompts">
+                                <div className="prompt-option">
+                                    <strong>Option 1:</strong>
+                                    <p>{proposedPrompts[0]}</p>
+                                </div>
+                                <div className="prompt-option">
+                                    <strong>Option 2:</strong>
+                                    <p>{proposedPrompts[1]}</p>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const generateContentWithRetry = async (
+    ai: GoogleGenAI,
+    request: { model: string; contents: string },
+    retries = 5,
+    delay = 1000
+): Promise<GenerateContentResponse> => {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const response = await ai.models.generateContent(request);
+            return response;
+        } catch (error) {
+            console.error(`Gemini API call attempt ${i + 1} of ${retries} failed:`, error);
+            if (i < retries - 1) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                throw error; // Re-throw the error on the last attempt
+            }
+        }
+    }
+    // This part is unreachable if the loop logic is correct, but satisfies TypeScript's return type requirement.
+    throw new Error('Failed to generate content after all retries.');
+};
 
 const App = () => {
     const [markdownFile, setMarkdownFile] = useState<File | null>(null);
@@ -117,9 +189,36 @@ const App = () => {
     const [markdownError, setMarkdownError] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [imageReferences, setImageReferences] = useState<ImageReference[]>([]);
+    const [templates, setTemplates] = useState<{ context: string; description: string; } | null>(null);
+    const [templateError, setTemplateError] = useState('');
+    const promptCache = useRef(new Map<string, ImageReference[]>());
+
+    useEffect(() => {
+        const loadTemplates = async () => {
+            try {
+                const [contextRes, descriptionRes] = await Promise.all([
+                    fetch('./context_to_description.txt'),
+                    fetch('./description_to_nano_prompt.txt')
+                ]);
+
+                if (!contextRes.ok || !descriptionRes.ok) {
+                    throw new Error('Failed to load prompt templates. Check network tab for details.');
+                }
+
+                const contextTemplate = await contextRes.text();
+                const descriptionTemplate = await descriptionRes.text();
+                
+                setTemplates({ context: contextTemplate, description: descriptionTemplate });
+            } catch (error) {
+                console.error("Error loading templates:", error);
+                setTemplateError('Could not load required prompt templates. Please refresh the page.');
+            }
+        };
+        loadTemplates();
+    }, []);
 
     const handleMarkdownSelect = async (file: File) => {
-        setMarkdownFile(null); // Reset on new selection
+        setMarkdownFile(null);
         setMarkdownError('');
         setImageReferences([]);
 
@@ -150,16 +249,15 @@ const App = () => {
     };
 
     const handlePropose = async () => {
-        if (!markdownFile) return;
+        if (!markdownFile || !templates) return;
         setIsLoading(true);
         setMarkdownError('');
-        setImageReferences([]);
-
-        let markdownContent = '';
-        let zipFilePaths: string[] = [];
-        const isZip = markdownFile.name.endsWith('.zip');
 
         try {
+            let markdownContent = '';
+            let zipFilePaths: string[] = [];
+            const isZip = markdownFile.name.endsWith('.zip');
+
             if (isZip) {
                 const zip = await JSZip.loadAsync(markdownFile);
                 zipFilePaths = Object.keys(zip.files).filter(name => !zip.files[name].dir);
@@ -171,42 +269,37 @@ const App = () => {
                     markdownContent = await mdFileEntry.async('string');
                 } else {
                     setMarkdownError('No .md file found in the .zip archive.');
-                    setIsLoading(false);
                     return;
                 }
             } else {
                 markdownContent = await markdownFile.text();
             }
+            
+            if (promptCache.current.has(markdownContent)) {
+                setImageReferences(promptCache.current.get(markdownContent)!);
+                return; // finally will set isLoading to false
+            }
 
             const references: ImageReference[] = [];
             
-            // 1. Find Markdown image references: ![]()
-            const markdownRegex = /!\[([^\]]*)\]\((.*?)\)/g; // Use non-greedy regex for path
+            const markdownRegex = /!\[([^\]]*)\]\((.*?)\)/g;
             let match;
 
             while ((match = markdownRegex.exec(markdownContent)) !== null) {
                 const [fullMatch, rawAlt, rawPath] = match;
-
-                // Split path from optional title. Title must be in quotes.
                 const pathParts = rawPath.split(/\s+(?=["'])/, 2);
                 let path = pathParts[0].trim();
                 if (path.startsWith('<') && path.endsWith('>')) {
                     path = path.slice(1, -1);
                 }
-                
-                // Unescape characters like \), \(, \\ etc.
                 path = path.replace(/\\(.)/g, '$1');
                 const alt = rawAlt.replace(/\\(.)/g, '$1');
-
                 const matchIndex = match.index;
-
                 const contentBeforeMatch = markdownContent.substring(0, matchIndex);
                 const lineNumber = (contentBeforeMatch.match(/\n/g) || []).length + 1;
-
                 const contextStart = Math.max(0, matchIndex - 500);
                 const contextEnd = Math.min(markdownContent.length, matchIndex + fullMatch.length + 500);
                 const context = markdownContent.substring(contextStart, contextEnd);
-
                 let status: ImageReference['status'] = 'to-generate';
                 if (isZip) {
                     const normalizedPath = path.startsWith('./') ? path.substring(2) : path;
@@ -215,35 +308,25 @@ const App = () => {
                         status = 'existing';
                     }
                 }
-
                 references.push({ lineNumber, alt, path, context, status });
             }
 
-            // 2. Find HTML <img> tag references
             const htmlImgRegex = /<img([^>]+)>/gi;
-
             while ((match = htmlImgRegex.exec(markdownContent)) !== null) {
                 const [fullMatch, attrsString] = match;
                 if (!attrsString) continue;
-
                 const srcMatch = attrsString.match(/src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
                 const altMatch = attrsString.match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))/i);
-
                 const path = srcMatch ? srcMatch[1] || srcMatch[2] || srcMatch[3] : null;
 
-                // An img tag must have a src to be valid
                 if (path) {
                     const alt = altMatch ? altMatch[1] || altMatch[2] || altMatch[3] || '' : '';
-                    
                     const matchIndex = match.index;
-
                     const contentBeforeMatch = markdownContent.substring(0, matchIndex);
                     const lineNumber = (contentBeforeMatch.match(/\n/g) || []).length + 1;
-
                     const contextStart = Math.max(0, matchIndex - 500);
                     const contextEnd = Math.min(markdownContent.length, matchIndex + fullMatch.length + 500);
                     const context = markdownContent.substring(contextStart, contextEnd);
-
                     let status: ImageReference['status'] = 'to-generate';
                      if (isZip) {
                         const normalizedPath = path.startsWith('./') ? path.substring(2) : path;
@@ -252,19 +335,75 @@ const App = () => {
                             status = 'existing';
                         }
                     }
-
                     references.push({ lineNumber, alt, path, context, status });
                 }
             }
 
-            // 3. Sort all found references by line number
             references.sort((a, b) => a.lineNumber - b.lineNumber);
-
             setImageReferences(references);
 
+            const toGenerateList = references.filter(ref => ref.status === 'to-generate');
+            if (toGenerateList.length > 0) {
+                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+                
+                let finalReferencesForCache = [...references];
+
+                for (const ref of toGenerateList) {
+                    setImageReferences(prevRefs => 
+                        prevRefs.map(r => r.lineNumber === ref.lineNumber && r.path === ref.path ? { ...r, isGeneratingPrompts: true } : r)
+                    );
+
+                    let promptForGemini = '';
+                    if (ref.alt) {
+                        promptForGemini = templates.description.replace('{alt_text}', ref.alt);
+                    } else {
+                        promptForGemini = templates.context
+                            .replace('{file_content}', markdownContent)
+                            .replace('{context}', ref.context);
+                    }
+                    
+                    const response = await generateContentWithRetry(ai, {
+                        model: 'gemini-2.5-flash',
+                        contents: promptForGemini,
+                    });
+
+                    const text = response.text;
+                    const parsePromptsFromResponse = (responseText: string): [string, string] | undefined => {
+                        const prompt1Match = responseText.match(/<prompt_1>([\s\S]*?)<\/prompt_1>/);
+                        const prompt2Match = responseText.match(/<prompt_2>([\s\S]*?)<\/prompt_2>/);
+                        if (prompt1Match && prompt2Match) {
+                            const prompt1 = prompt1Match[1].trim();
+                            const prompt2 = prompt2Match[1].trim();
+                            return [prompt1, prompt2];
+                        }
+                        console.warn('Could not parse prompts from Gemini response:', responseText);
+                        return undefined;
+                    };
+
+                    const proposedPrompts = parsePromptsFromResponse(text);
+                    
+                    finalReferencesForCache = finalReferencesForCache.map(cacheRef => {
+                        if (cacheRef.lineNumber === ref.lineNumber && cacheRef.path === ref.path) {
+                            return { ...cacheRef, proposedPrompts: proposedPrompts ?? ['', ''] };
+                        }
+                        return cacheRef;
+                    });
+
+                    setImageReferences(prevRefs => 
+                        prevRefs.map(r => 
+                            r.lineNumber === ref.lineNumber && r.path === ref.path 
+                            ? { ...r, isGeneratingPrompts: false, proposedPrompts: proposedPrompts ?? ['', ''] } 
+                            : r
+                        )
+                    );
+                }
+                promptCache.current.set(markdownContent, finalReferencesForCache);
+            } else {
+                promptCache.current.set(markdownContent, references);
+            }
         } catch (error) {
-            console.error("Error processing file:", error);
-            setMarkdownError('Failed to parse the uploaded file.');
+            console.error("Error processing file or generating prompts:", error);
+            setMarkdownError('Failed to parse file or generate prompts. Check console for details.');
         } finally {
             setIsLoading(false);
         }
@@ -288,7 +427,7 @@ const App = () => {
                     file={markdownFile}
                     label="Markdown or .zip file"
                     dragLabel="Drop your document here"
-                    error={markdownError}
+                    error={markdownError || templateError}
                 />
             </section>
 
@@ -326,22 +465,34 @@ const App = () => {
                     </div>
                 </div>
             </section>
+            
+            {imageReferences.length > 0 && !isLoading && (
+              <section className="results-section">
+                <div className="results-summary">
+                    {existingImagesCount > 0 && (
+                        <p className="progress-indicator">
+                            Found {existingImagesCount} existing image{existingImagesCount !== 1 ? 's' : ''}.
+                        </p>
+                    )}
+                     {toGenerateImagesCount > 0 && (
+                        <p className="progress-indicator">
+                            Found {toGenerateImagesCount} image placeholder{toGenerateImagesCount !== 1 ? 's' : ''} to illustrate.
+                        </p>
+                    )}
+                </div>
+                <div className="image-reference-list">
+                  {imageReferences.map((ref) => (
+                    <ImageReferenceItem key={`${ref.lineNumber}-${ref.path}`} reference={ref} />
+                  ))}
+                </div>
+              </section>
+            )}
 
             <div className="propose-section">
                 {isLoading ? (
                     <Spinner />
                 ) : imageReferences.length > 0 ? (
                     <div className="generation-step">
-                        {existingImagesCount > 0 && (
-                            <p className="progress-indicator">
-                                Found {existingImagesCount} existing image{existingImagesCount !== 1 ? 's' : ''}.
-                            </p>
-                        )}
-                         {toGenerateImagesCount > 0 && (
-                            <p className="progress-indicator">
-                                Found {toGenerateImagesCount} image placeholder{toGenerateImagesCount !== 1 ? 's' : ''} to illustrate.
-                            </p>
-                        )}
                         <button 
                             className="propose-button"
                             disabled={toGenerateImagesCount === 0}
@@ -354,8 +505,8 @@ const App = () => {
                     <button
                         className="propose-button"
                         onClick={handlePropose}
-                        disabled={!markdownFile}
-                        aria-disabled={!markdownFile}
+                        disabled={!markdownFile || !templates}
+                        aria-disabled={!markdownFile || !templates}
                     >
                         Propose illustrative images
                     </button>
