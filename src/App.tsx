@@ -504,9 +504,14 @@ export const App = () => {
                 if (ref.status === 'existing') {
                     setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingImproved: true, improvedError: '', isGeneratingVariation: true, variationError: '' } : r));
 
-                    // Left image: improved version of the original (with style transfer if available)
+                    // Left image: improved/stylized version of the original (uses explicit base+style variation path)
                     const improveInstruction = ref.alt || '';
-                    const improvedRaw = await generateImageVariation(ai, ref.originalImage!, improveInstruction, styleImagePart).catch(e => {
+                    const improvedRaw = await generateImageVariation(
+                        ai,
+                        ref.originalImage!,
+                        improveInstruction,
+                        styleImagePart
+                    ).catch(e => {
                         console.error('Improve failed:', e);
                         return null;
                     });

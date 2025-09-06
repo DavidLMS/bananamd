@@ -82,15 +82,17 @@ export const generateImageVariation = async (ai: GoogleGenAI, base64ImageWithMim
     
     let textPrompt: string;
     if (styleImagePart) {
-        textPrompt = `Transform the provided image into the artistic style of the attached reference image. Preserve the original composition and subject${altText ? ` described as: "${altText}"` : ''}, and render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).`;
+        textPrompt = `You will receive two images: the first is the BASE content to restyle, the second is a STYLE REFERENCE only.\n\nTask: Redraw the BASE image entirely in the artistic style of the STYLE REFERENCE. Preserve the BASE scene layout and core subjects (positions and proportions), but restyle ALL forms, edges and surfaces to match the reference's technique: palette, brush/line quality, material texture and lighting mood. Do NOT copy, merge or insert any objects, backgrounds or layout from the STYLE REFERENCE; use it only as a style guide. Output must look fully repainted in that style while keeping the same composition and subject identity.${altText ? `\nContext about subject: "${altText}".` : ''}`;
     } else {
         textPrompt = `Improve this image: enhance clarity, lighting, dynamic range, and detail; preserve composition and subject.${altText ? ` Context: "${altText}".` : ''}`;
     }
 
+    // dev logging removed
     const response = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash-image-preview',
         contents: {
-            parts: styleImagePart ? [imagePart, styleImagePart, { text: textPrompt }] : [imagePart, { text: textPrompt }],
+            // Put instruction first, then base, then style for clarity
+            parts: styleImagePart ? [{ text: textPrompt }, imagePart, styleImagePart] : [{ text: textPrompt }, imagePart],
         },
         config: {
             responseModalities: [Modality.IMAGE, Modality.TEXT],
@@ -181,16 +183,21 @@ export const generateEditedImage = async (
     const state = chatSessions.get(branchKey);
     const isFirstTurn = !state?.seededWithImageId;
     if (isFirstTurn) {
+        // dev logging removed
         const response = await generateContentWithRetry(ai, {
             model: 'gemini-2.5-flash-image-preview',
             contents: {
+                // Instruction first for clarity, then base, then style
                 parts: styleImagePart
                     ? [
+                        { text: `${instruction}\n\nRedraw the current image from scratch in the artistic style of the attached reference image. Preserve the existing scene layout and core subjects, but restyle ALL forms, edges and surfaces to match the reference's technique (palette, brush/line quality, texture, lighting). Do NOT copy or insert any objects or layout from the reference.` },
                         dataUrlToPart(currentImageDataUrl),
-                        styleImagePart,
-                        { text: `${instruction}\n\nTransform the current image into the artistic style of the attached reference image. Preserve the existing composition and subject, but render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).` }
+                        styleImagePart
                       ]
-                    : [dataUrlToPart(currentImageDataUrl), { text: instruction }],
+                    : [
+                        { text: instruction },
+                        dataUrlToPart(currentImageDataUrl)
+                      ],
             },
             config: {
                 responseModalities: [Modality.IMAGE, Modality.TEXT],
@@ -208,16 +215,21 @@ export const generateEditedImage = async (
     }
 
     if (mode === 'chat' && chat) {
+        // dev logging removed
         const response = await chat
             .sendMessage({
                 message: instruction,
+                // Instruction first for clarity
                 parts: styleImagePart
                     ? [
+                        { text: `${instruction}\n\nRedraw the current image from scratch in the artistic style of the attached reference image. Preserve the existing scene layout and core subjects, but restyle ALL forms, edges and surfaces to match the reference's technique (palette, brush/line quality, texture, lighting). Do NOT copy or insert any objects or layout from the reference.` },
                         baseImagePart,
-                        styleImagePart,
-                        { text: `${instruction}\n\nTransform the current image into the artistic style of the attached reference image. Preserve the existing composition and subject, but render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).` }
+                        styleImagePart
                       ]
-                    : [baseImagePart, { text: instruction }]
+                    : [
+                        { text: instruction },
+                        baseImagePart
+                      ]
             })
             .catch(() => null as any);
         if (response?.candidates) {
@@ -235,7 +247,7 @@ export const generateEditedImage = async (
                 ? [
                     dataUrlToPart(currentImageDataUrl),
                     styleImagePart,
-                    { text: `${instruction}\n\nTransform the current image into the artistic style of the attached reference image. Preserve the existing composition and subject, but render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).` }
+                    { text: `${instruction}\n\nRedraw the current image from scratch in the artistic style of the attached reference image. Preserve the existing scene layout and core subjects, but restyle ALL forms, edges and surfaces to match the reference's technique (palette, brush/line quality, texture, lighting). Do NOT copy or insert any objects or layout from the reference.` }
                   ]
                 : [dataUrlToPart(currentImageDataUrl), { text: instruction }],
         },
