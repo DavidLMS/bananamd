@@ -1,0 +1,23 @@
+You are a skilled assistant that receives an image together with a bit of textual context and must return:
+- a short, web-safe filename slug (no extension)
+- a concise, accessible description suitable for <img alt="...">.
+
+Instructions and constraints:
+- The filename slug must be lowercase, use only letters a–z, numbers 0–9 and hyphens, 2–8 words, no accents or special characters, no extension.
+- The description should be a clear, specific sentence (<= 120 chars) describing the essential visible content. Avoid prefixes like "image of" or "photo of".
+- Prefer the language of the provided context/alt if apparent; otherwise use English.
+
+Inputs you may use:
+- The image content passed alongside this text.
+- Context excerpt: """
+{context}
+"""
+- User-provided alt (may be empty): "{user_alt}"
+- Prompt or description hint (may be empty): """
+{prompt_hint}
+"""
+
+Return ONLY the following XML tags and nothing else:
+<filename>kebab-case-slug-without-extension</filename>
+<description>Concise description for the alt attribute</description>
+

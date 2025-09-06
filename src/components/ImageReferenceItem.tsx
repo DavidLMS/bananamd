@@ -6,6 +6,10 @@ export interface ImageReference {
     alt: string;
     path: string;
     context: string;
+    // Export helpers
+    startIndex?: number;
+    matchLength?: number;
+    syntax?: 'markdown' | 'html';
     status: 'existing' | 'to-generate';
     isGeneratingPrompts?: boolean;
     proposedPrompts?: [string, string];
@@ -128,7 +132,7 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                             <h4 className="column-label">Original</h4>
                             {originalImage ? (
                                 <>
-                                    <div className="generated-image-wrapper">
+                                    <div className={`generated-image-wrapper ${reference.selectedIndex === 0 ? 'selected' : ''}`} onClick={() => onSelect(0)}>
                                         {renderVersionBadge(histories?.[0])}
                                         {renderNavArrows(histories?.[0], 0)}
                                     <img
@@ -152,7 +156,7 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                  <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Loading variation"></div>
                              ) : generatedVariation ? (
                                 <>
-                                    <div className="generated-image-wrapper">
+                                    <div className={`generated-image-wrapper ${reference.selectedIndex === 1 ? 'selected' : ''}`} onClick={() => onSelect(1)}>
                                         {renderVersionBadge(histories?.[1])}
                                         {renderNavArrows(histories?.[1], 1)}
                                     <img

@@ -19,10 +19,11 @@ export const App = () => {
     const [markdownError, setMarkdownError] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [imageReferences, setImageReferences] = useState<ImageReference[]>([]);
+    const [mdBaseName, setMdBaseName] = useState<string>('document.md');
     const [currentReferenceIndex, setCurrentReferenceIndex] = useState<number | null>(null);
     const generationTriggered = useRef(new Set<number>());
 
-    const [templates, setTemplates] = useState<{ context: string; description: string; } | null>(null);
+    const [templates, setTemplates] = useState<{ context: string; description: string; naming: string; } | null>(null);
     const [templateError, setTemplateError] = useState('');
 
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -30,6 +31,13 @@ export const App = () => {
 
     const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
     const [promptModalContent, setPromptModalContent] = useState('');
+
+    // Export state
+    const [exporting, setExporting] = useState(false);
+    const [exportError, setExportError] = useState('');
+    const [exportPreview, setExportPreview] = useState('');
+    const [zipUrl, setZipUrl] = useState<string | null>(null);
+    const [zipAllUrl, setZipAllUrl] = useState<string | null>(null);
 
     const openModal = (content: string) => {
         setModalContent(content);
@@ -51,22 +59,241 @@ export const App = () => {
         setPromptModalContent('');
     };
 
+    const allImagesSelected = React.useMemo(() => {
+        if (!imageReferences.length) return false;
+        return imageReferences.every(ref => {
+            if (ref.status === 'to-generate') {
+                const idx = ref.selectedIndex;
+                if (idx === undefined || idx === null) return false;
+                const hist = ref.histories?.[idx] || null;
+                const img = hist ? hist.nodes[hist.currentId].imageData : ref.generatedImages?.[idx] || null;
+                return !!img;
+            } else {
+                const idx = ref.selectedIndex ?? 0;
+                if (idx === 0) {
+                    const hist = ref.histories?.[0] || null;
+                    const img = hist ? hist.nodes[hist.currentId].imageData : ref.originalImage || null;
+                    return !!img;
+                } else {
+                    const hist = ref.histories?.[1] || null;
+                    const img = hist ? hist.nodes[hist.currentId].imageData : ref.generatedVariation || null;
+                    return !!img;
+                }
+            }
+        });
+    }, [imageReferences]);
+
+    const getSelectedImageData = (ref: ImageReference): { img: string; idx: number; promptHint: string } => {
+        const idx = ref.status === 'to-generate' ? (ref.selectedIndex as number) : (ref.selectedIndex ?? 0);
+        let img: string | null | undefined = null;
+        if (ref.status === 'to-generate') {
+            const hist = ref.histories?.[idx] || null;
+            img = hist ? hist.nodes[hist.currentId].imageData : (ref.generatedImages?.[idx] || null);
+        } else {
+            if (idx === 0) {
+                const hist = ref.histories?.[0] || null;
+                img = hist ? hist.nodes[hist.currentId].imageData : (ref.originalImage || null);
+            } else {
+                const hist = ref.histories?.[1] || null;
+                img = hist ? hist.nodes[hist.currentId].imageData : (ref.generatedVariation || null);
+            }
+        }
+        const promptHint = ref.proposedPrompts?.[idx] || ref.alt || '';
+        return { img: img as string, idx, promptHint };
+    };
+
+    const parseDataUrl = (dataUrl: string): { mimeType: string; base64: string } => {
+        const mimeType = dataUrl.substring(dataUrl.indexOf(":") + 1, dataUrl.indexOf(";"));
+        const base64 = dataUrl.split(',')[1] || '';
+        return { mimeType, base64 };
+    };
+    const extFromMime = (mime: string): string => {
+        if (mime.includes('png')) return 'png';
+        if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
+        if (mime.includes('webp')) return 'webp';
+        if (mime.includes('gif')) return 'gif';
+        return 'png';
+    };
+    const sanitizeSlug = (s: string): string => {
+        const cleaned = s.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-');
+        return cleaned || 'image';
+    };
+
+    const createFilenameAndDescription = async (
+        ai: GoogleGenAI,
+        ref: ImageReference,
+        promptHint: string,
+        imageDataUrl: string
+    ): Promise<{ slug: string; alt: string }> => {
+        if (!templates?.naming) throw new Error('Naming template not loaded');
+        const tmpl = templates.naming
+            .replace('{context}', ref.context || '')
+            .replace('{user_alt}', ref.alt || '')
+            .replace('{prompt_hint}', promptHint || '');
+        const { mimeType, base64 } = parseDataUrl(imageDataUrl);
+        const imagePart = { inlineData: { mimeType, data: base64 } } as any;
+        const resp = await generateContentWithRetry(ai, {
+            model: 'gemini-2.5-flash',
+            contents: { parts: [imagePart, { text: tmpl }] },
+        });
+        const txt = typeof (resp as any).text === 'function' ? await (resp as any).text() : String((resp as any).text || '');
+        const filenameMatch = txt.match(/<filename>([\s\S]*?)<\/filename>/);
+        const descMatch = txt.match(/<description>([\s\S]*?)<\/description>/);
+        const rawSlug = sanitizeSlug((filenameMatch?.[1] || '').trim());
+        const alt = (descMatch?.[1] || '').trim();
+        return { slug: rawSlug || 'image', alt: alt || ref.alt || 'Illustrative image' };
+    };
+
+    const createAltAndSlug = async (ai: GoogleGenAI, ref: ImageReference, promptHint: string): Promise<{ slug: string; alt: string }> => {
+        const template = `You are a helpful assistant that creates web-friendly image filenames and accessible alt text.\n\nConstraints:\n- Filename slug: lowercase, letters a-z, numbers 0-9, hyphens only, 3-8 words, no extension.\n- Alt text: concise (<= 120 chars), describe essential content, no leading \"image of\" or \"photo of\".\n\nGiven:\nContext: """${ref.context}"""\nUser alt (may be empty): "${ref.alt || ''}"\nSelected prompt/description (may be empty): """${promptHint || ''}"""\n\nReturn ONLY:\n<filename_slug>...</filename_slug>\n<alt_text>...</alt_text>`;
+        const resp = await generateContentWithRetry(ai, { model: 'gemini-2.5-flash', contents: template });
+        const txt = typeof (resp as any).text === 'function' ? await (resp as any).text() : String((resp as any).text || '');
+        const slugMatch = txt.match(/<filename_slug>([\s\S]*?)<\/filename_slug>/);
+        const altMatch = txt.match(/<alt_text>([\s\S]*?)<\/alt_text>/);
+        const rawSlug = sanitizeSlug((slugMatch?.[1] || '').trim());
+        const alt = (altMatch?.[1] || '').trim();
+        return { slug: rawSlug || 'image', alt: alt || ref.alt || 'Illustrative image' };
+    };
+
+    const handleBuildExports = async () => {
+        if (!markdownContent) return;
+        setExporting(true);
+        setExportError('');
+        setExportPreview('');
+        setZipUrl(null);
+        setZipAllUrl(null);
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const zip = new JSZip();
+            const imagesFolder = zip.folder('images');
+
+            // Sort references by startIndex for deterministic replacement order
+            const sorted = [...imageReferences].sort((a, b) => (a.startIndex || 0) - (b.startIndex || 0));
+
+            const fileInfos: { ref: ImageReference; filename: string; alt: string; relPath: string }[] = [];
+            const slugByRef = new Map<number, string>();
+
+            for (const ref of sorted) {
+                const { img, promptHint } = getSelectedImageData(ref);
+                const { mimeType, base64 } = parseDataUrl(img);
+                const { slug, alt } = await createFilenameAndDescription(ai, ref, promptHint, img);
+                const ext = extFromMime(mimeType);
+                // Add line number prefix to avoid collisions and keep context
+                const filename = `${ref.lineNumber}-${slug}.${ext}`;
+                slugByRef.set(ref.lineNumber, slug);
+                imagesFolder!.file(filename, base64, { base64: true });
+                fileInfos.push({ ref, filename, alt, relPath: `images/${filename}` });
+            }
+
+            // Rebuild Markdown content with new alts and image paths
+            let cursor = 0;
+            let rebuilt = '';
+            for (const info of sorted.map(r => fileInfos.find(f => f.ref === r)!)) {
+                const start = info.ref.startIndex || 0;
+                const end = start + (info.ref.matchLength || 0);
+                rebuilt += markdownContent.slice(cursor, start);
+                if (info.ref.syntax === 'markdown') {
+                    rebuilt += `![${info.alt}](${info.relPath})`;
+                } else {
+                    const original = markdownContent.slice(start, end);
+                    let replaced = original.replace(/src\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)/i, `src="${info.relPath}"`);
+                    if (/alt\s*=\s*/i.test(replaced)) {
+                        replaced = replaced.replace(/alt\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)/i, `alt="${info.alt}"`);
+                    } else {
+                        replaced = replaced.replace(/<img/i, `<img alt="${info.alt}"`);
+                    }
+                    rebuilt += replaced;
+                }
+                cursor = end;
+            }
+            rebuilt += markdownContent.slice(cursor);
+
+            // Add updated markdown file
+            zip.file(mdBaseName, rebuilt);
+
+            // Build optional ZIP with all generated images
+            const zipAll = new JSZip();
+            const allFolder = zipAll.folder('images');
+            const addedSet = new Set<string>();
+            const toAdd = (name: string, dataUrl: string) => {
+                const { base64 } = parseDataUrl(dataUrl);
+                if (!addedSet.has(name)) {
+                    allFolder!.file(name, base64, { base64: true });
+                    addedSet.add(name);
+                }
+            };
+            for (const ref of sorted) {
+                const baseSlug = slugByRef.get(ref.lineNumber) || `${ref.lineNumber}-image`;
+                const collect = (dataUrl: string | null | undefined, suffix: string) => {
+                    if (!dataUrl) return;
+                    const { mimeType } = parseDataUrl(dataUrl);
+                    const ext = extFromMime(mimeType);
+                    const fname = `${ref.lineNumber}-${baseSlug}-${suffix}.${ext}`;
+                    toAdd(fname, dataUrl);
+                };
+                if (ref.status === 'to-generate') {
+                    // both initial options
+                    collect(ref.generatedImages?.[0], 'option1');
+                    collect(ref.generatedImages?.[1], 'option2');
+                    // histories for both slots
+                    const h0 = ref.histories?.[0];
+                    if (h0) {
+                        h0.order.forEach((id, idx) => collect(h0.nodes[id].imageData, `hist0-v${idx + 1}`));
+                    }
+                    const h1 = ref.histories?.[1];
+                    if (h1) {
+                        h1.order.forEach((id, idx) => collect(h1.nodes[id].imageData, `hist1-v${idx + 1}`));
+                    }
+                } else {
+                    collect(ref.originalImage, 'original');
+                    collect(ref.generatedVariation, 'variation');
+                    const h0 = ref.histories?.[0];
+                    if (h0) {
+                        h0.order.forEach((id, idx) => collect(h0.nodes[id].imageData, `hist0-v${idx + 1}`));
+                    }
+                    const h1 = ref.histories?.[1];
+                    if (h1) {
+                        h1.order.forEach((id, idx) => collect(h1.nodes[id].imageData, `hist1-v${idx + 1}`));
+                    }
+                }
+            }
+
+            const [blobMain, blobAll] = await Promise.all([
+                zip.generateAsync({ type: 'blob' }),
+                zipAll.generateAsync({ type: 'blob' })
+            ]);
+
+            const mainUrl = URL.createObjectURL(blobMain);
+            const allUrl = URL.createObjectURL(blobAll);
+            setZipUrl(mainUrl);
+            setZipAllUrl(allUrl);
+            setExportPreview(rebuilt);
+        } catch (e: any) {
+            console.error('Export failed:', e);
+            setExportError(e?.message || 'Export failed');
+        } finally {
+            setExporting(false);
+        }
+    };
+
     useEffect(() => {
         const loadTemplates = async () => {
             try {
-                const [contextRes, descriptionRes] = await Promise.all([
+                const [contextRes, descriptionRes, namingRes] = await Promise.all([
                     fetch('./context_to_description.txt'),
-                    fetch('./description_to_nano_prompt.txt')
+                    fetch('./description_to_nano_prompt.txt'),
+                    fetch('./image_to_filename_description.txt')
                 ]);
 
-                if (!contextRes.ok || !descriptionRes.ok) {
+                if (!contextRes.ok || !descriptionRes.ok || !namingRes.ok) {
                     throw new Error('Failed to load prompt templates. Check network tab for details.');
                 }
 
                 const contextTemplate = await contextRes.text();
                 const descriptionTemplate = await descriptionRes.text();
+                const namingTemplate = await namingRes.text();
                 
-                setTemplates({ context: contextTemplate, description: descriptionTemplate });
+                setTemplates({ context: contextTemplate, description: descriptionTemplate, naming: namingTemplate });
             } catch (error) {
                 console.error("Error loading templates:", error);
                 setTemplateError('Could not load required prompt templates. Please refresh the page.');
@@ -131,11 +358,14 @@ export const App = () => {
 
                 if (mdFileEntry) {
                     currentMarkdownContent = await mdFileEntry.async('string');
+                    const base = (mdFileEntry.name.split('/').pop() || 'document.md');
+                    setMdBaseName(base);
                 } else {
                     throw new Error('No .md file found in the .zip archive.');
                 }
             } else {
                 currentMarkdownContent = await markdownFile.text();
+                setMdBaseName(markdownFile.name);
             }
             setMarkdownContent(currentMarkdownContent);
 
@@ -175,7 +405,7 @@ export const App = () => {
                         originalImage = `data:${mimeType};base64,${base64Data}`;
                     }
                 }
-                references.push({ lineNumber, alt, path, context, status, originalImage });
+                references.push({ lineNumber, alt, path, context, status, originalImage, startIndex: matchIndex, matchLength: fullMatch.length, syntax: 'markdown' });
             }
 
             const htmlImgRegex = /<img([^>]+)>/gi;
@@ -213,12 +443,13 @@ export const App = () => {
                             originalImage = `data:${mimeType};base64,${base64Data}`;
                         }
                     }
-                    references.push({ lineNumber, alt, path, context, status, originalImage });
+                    references.push({ lineNumber, alt, path, context, status, originalImage, startIndex: matchIndex, matchLength: fullMatch.length, syntax: 'html' });
                 }
             }
 
             references.sort((a, b) => a.lineNumber - b.lineNumber);
-            setImageReferences(references);
+            const withDefaults = references.map(r => r.status === 'existing' ? { ...r, selectedIndex: r.selectedIndex ?? 0 } : r);
+            setImageReferences(withDefaults);
             if(references.length > 0) {
                 setCurrentReferenceIndex(0);
                 setView('generation');
@@ -392,8 +623,24 @@ export const App = () => {
     const handleImageSelect = useCallback((imageIndex: number) => {
         if (currentReferenceIndex === null) return;
 
+        // If maintaining style and first selection, capture the picked image as style reference
         if (maintainStyle && currentReferenceIndex === 0 && !styleReferenceImage) {
-            const selectedImage = imageReferences[currentReferenceIndex].generatedImages?.[imageIndex];
+            const ref = imageReferences[currentReferenceIndex];
+            let selectedImage: string | null | undefined = null;
+            if (ref.status === 'to-generate') {
+                // Prefer history current if exists, else the generated option
+                const history = ref.histories?.[imageIndex] || null;
+                selectedImage = history ? history.nodes[history.currentId].imageData : ref.generatedImages?.[imageIndex];
+            } else {
+                // existing: 0=original, 1=variation
+                if (imageIndex === 0) {
+                    const history = ref.histories?.[0] || null;
+                    selectedImage = history ? history.nodes[history.currentId].imageData : (ref.originalImage || null);
+                } else {
+                    const history = ref.histories?.[1] || null;
+                    selectedImage = history ? history.nodes[history.currentId].imageData : (ref.generatedVariation || null);
+                }
+            }
             if (selectedImage) {
                 const mimeType = selectedImage.substring(selectedImage.indexOf(":") + 1, selectedImage.indexOf(";"));
                 const data = selectedImage.split(',')[1];
@@ -693,6 +940,33 @@ export const App = () => {
                             }}
                         />
                     </div>
+                </section>
+            )}
+            {view === 'generation' && allImagesSelected && (
+                <section className="results-section" style={{ marginTop: '1rem' }}>
+                    <div className="results-navigation">
+                        <span>All images selected — ready to export</span>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button className="nav-button" onClick={handleBuildExports} disabled={exporting}>
+                                {exporting ? 'Building…' : 'Generate Download(s)'}
+                            </button>
+                            {zipUrl && (
+                                <a className="nav-button" href={zipUrl} download={`bananamd-package.zip`}>Download ZIP</a>
+                            )}
+                            {zipAllUrl && (
+                                <a className="nav-button" href={zipAllUrl} download={`bananamd-all-images.zip`}>Download All Images</a>
+                            )}
+                        </div>
+                    </div>
+                    {exportError && <p className="generation-error">{exportError}</p>}
+                    {exportPreview && (
+                        <div className="image-reference-item" style={{ marginTop: '1rem' }}>
+                            <div className="item-header">
+                                <span className="item-path">Updated Markdown Preview</span>
+                            </div>
+                            <pre style={{ whiteSpace: 'pre-wrap', textAlign: 'left' }}><code>{exportPreview}</code></pre>
+                        </div>
+                    )}
                 </section>
             )}
             
