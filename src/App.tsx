@@ -504,8 +504,9 @@ export const App = () => {
                 if (ref.status === 'existing') {
                     setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingImproved: true, improvedError: '', isGeneratingVariation: true, variationError: '' } : r));
 
-                    const improveInstruction = 'Improve this image: enhance clarity, lighting, dynamic range, and detail; preserve composition and subject.';
-                    const improvedRaw = await generateEditedImage(ai, `${ref.lineNumber}-improve`, ref.originalImage!, improveInstruction, styleImagePart).catch(e => {
+                    // Left image: improved version of the original (with style transfer if available)
+                    const improveInstruction = ref.alt || '';
+                    const improvedRaw = await generateImageVariation(ai, ref.originalImage!, improveInstruction, styleImagePart).catch(e => {
                         console.error('Improve failed:', e);
                         return null;
                     });

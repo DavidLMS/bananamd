@@ -80,7 +80,12 @@ export const generateImageVariation = async (ai: GoogleGenAI, base64ImageWithMim
         },
     };
     
-    let textPrompt = `Transform the provided image into the artistic style of the attached reference image. Preserve the original composition and subject${altText ? ` described as: "${altText}"` : ''}, and render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).`;
+    let textPrompt: string;
+    if (styleImagePart) {
+        textPrompt = `Transform the provided image into the artistic style of the attached reference image. Preserve the original composition and subject${altText ? ` described as: "${altText}"` : ''}, and render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).`;
+    } else {
+        textPrompt = `Improve this image: enhance clarity, lighting, dynamic range, and detail; preserve composition and subject.${altText ? ` Context: "${altText}".` : ''}`;
+    }
 
     const response = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash-image-preview',

@@ -131,57 +131,45 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
             
             <div className="item-body">
                 {status === 'existing' && (
-                    <div className="existing-image-container">
-                        <div className="image-column">
-                            <h4 className="column-label">Improved</h4>
-                            {reference.isGeneratingImproved ? (
-                                <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Improving image"></div>
-                            ) : (reference.generatedImproved || originalImage) ? (
-                                <>
+                    <div className="generation-result">
+                        <button className="context-button" onClick={() => onOpenContext(context)}>
+                            See context
+                        </button>
+                        {(reference.isGeneratingImproved || isGeneratingVariation) ? (
+                            <div className="generated-images-container">
+                                <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Loading image 1"></div>
+                                <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Loading image 2"></div>
+                            </div>
+                        ) : (
+                            <div className="generated-images-container">
+                                <div className="image-column">
                                     <div className={`generated-image-wrapper ${reference.selectedIndex === 0 ? 'selected' : ''}`} onClick={() => onSelect(0)}>
                                         {renderVersionBadge(histories?.[0])}
                                         {renderNavArrows(histories?.[0], 0)}
-                                    <img
-                                        src={histories?.[0] ? histories[0]!.nodes[histories[0]!.currentId].imageData : (reference.generatedImproved || originalImage)!}
-                                        alt="Improved image"
-                                        className="generated-image"
-                                        onError={() => onImageError(0)}
-                                    />
+                                        { (histories?.[0] || reference.generatedImproved) ? (
+                                            <img src={histories?.[0] ? histories[0]!.nodes[histories[0]!.currentId].imageData : reference.generatedImproved!} alt="Generated image option 1" className="generated-image" onError={(e) => { e.stopPropagation(); onImageError(0); }} />
+                                        ) : (
+                                            <div className="generated-image-wrapper placeholder">Image 1 failed</div>
+                                        )}
                                     </div>
                                     <EditInput imageIndex={0} />
-                                </>
-                            ) : (
-                                <div className="generated-image-wrapper placeholder">
-                                    Cannot load image.
                                 </div>
-                            )}
-                            {reference.improvedError && <p className="generation-error small">{reference.improvedError}</p>}
-                        </div>
-                        <div className="image-column">
-                             <h4 className="column-label">AI Variation</h4>
-                             {isGeneratingVariation ? (
-                                 <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Loading variation"></div>
-                             ) : generatedVariation ? (
-                                <>
+                                <div className="image-column">
                                     <div className={`generated-image-wrapper ${reference.selectedIndex === 1 ? 'selected' : ''}`} onClick={() => onSelect(1)}>
                                         {renderVersionBadge(histories?.[1])}
                                         {renderNavArrows(histories?.[1], 1)}
-                                    <img
-                                        src={histories?.[1] ? histories[1]!.nodes[histories[1]!.currentId].imageData : generatedVariation}
-                                        alt="AI generated variation"
-                                        className="generated-image"
-                                        onError={() => onImageError(1)}
-                                    />
+                                        { (histories?.[1] || generatedVariation) ? (
+                                            <img src={histories?.[1] ? histories[1]!.nodes[histories[1]!.currentId].imageData : generatedVariation!} alt="Generated image option 2" className="generated-image" onError={(e) => { e.stopPropagation(); onImageError(1); }} />
+                                        ) : (
+                                            <div className="generated-image-wrapper placeholder">Image 2 failed</div>
+                                        )}
                                     </div>
                                     <EditInput imageIndex={1} />
-                                </>
-                             ) : (
-                                 <div className="generated-image-wrapper variation-placeholder">
-                                     <span>Preparing variation…</span>
-                                 </div>
-                             )}
-                             {variationError && <p className="generation-error small">{variationError}</p>}
-                        </div>
+                                </div>
+                            </div>
+                        )}
+                        {reference.improvedError && <p className="generation-error small">{reference.improvedError}</p>}
+                        {variationError && <p className="generation-error small">{variationError}</p>}
                     </div>
                 )}
                 {status === 'to-generate' && (
