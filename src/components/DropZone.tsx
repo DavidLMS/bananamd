@@ -62,7 +62,7 @@ export const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLab
 
     return (
         <div
-            className={`drop-zone ${isDragging ? 'drag-over' : ''} ${error ? 'has-error' : ''} ${disabled ? 'disabled' : ''}`}}
+            className={`drop-zone ${isDragging ? 'drag-over' : ''} ${error ? 'has-error' : ''} ${disabled ? 'disabled' : ''}`}
             onDragEnter={handleDragEnter}
             onDragLeave={handleDragLeave}
             onDragOver={handleDragOver}

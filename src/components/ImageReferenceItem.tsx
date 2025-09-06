@@ -17,6 +17,7 @@ export interface ImageReference {
     generatedVariation?: string | null;
     variationError?: string;
     selectedIndex?: number | null;
+    isRetrying?: boolean;
 }
 
 interface ImageReferenceItemProps {
@@ -114,7 +115,7 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                     ) : (
                                         <div className="generated-image-wrapper placeholder">
                                             Image 1 failed
-                                            <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(0); }}>Try again</button>
+                                            {reference.isRetrying ? <InlineSpinner /> : <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(0); }}>Try again</button>}
                                         </div>
                                     )}
                                     {generatedImages[1] && reference.proposedPrompts?.[1] ? (
@@ -125,7 +126,7 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                     ) : (
                                         <div className="generated-image-wrapper placeholder">
                                             Image 2 failed
-                                            <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(1); }}>Try again</button>
+                                            {reference.isRetrying ? <InlineSpinner /> : <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(1); }}>Try again</button>}
                                         </div>
                                     )}
                                 </div>

@@ -356,11 +356,17 @@ export const App = () => {
     const handleRegenerateImage = async (imageIndex: number) => {
         if (currentReferenceIndex === null) return;
 
+        const updatedReferences = [...imageReferences];
+        updatedReferences[currentReferenceIndex].isRetrying = true;
+        setImageReferences(updatedReferences);
+
         const reference = imageReferences[currentReferenceIndex];
         const prompt = reference.proposedPrompts?.[imageIndex];
 
         if (!prompt) {
             console.error("Could not find prompt for regeneration.");
+            updatedReferences[currentReferenceIndex].isRetrying = false;
+            setImageReferences(updatedReferences);
             return;
         }
 
@@ -377,14 +383,15 @@ export const App = () => {
 
             const newImage = await generateImageFromPrompt(ai, prompt, styleImagePart);
 
-            const updatedReferences = [...imageReferences];
             if (updatedReferences[currentReferenceIndex].generatedImages) {
                 updatedReferences[currentReferenceIndex].generatedImages![imageIndex] = newImage;
-                setImageReferences(updatedReferences);
             }
 
         } catch (error) {
             console.error(`Failed to regenerate image for L${reference.lineNumber}:`, error);
+        } finally {
+            updatedReferences[currentReferenceIndex].isRetrying = false;
+            setImageReferences(updatedReferences);
         }
     };
 
@@ -470,7 +477,7 @@ export const App = () => {
                                     <span className="checkbox-custom">
                                         <CheckIcon />
                                     </span>
-                                    Maintain original image style (for variations)
+                                    Try to maintain the style of the first image
                                 </label>
                             </div>
                         </div>
