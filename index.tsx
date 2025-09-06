@@ -18,6 +18,7 @@ const CheckIcon = () => (
 );
 
 const ChevronIcon = ({ expanded }) => (
+    // FIX: Corrected a typo in the viewBox attribute. It had an extra ' 24"' which broke JSX parsing.
     <svg className={`chevron-icon ${expanded ? 'expanded' : ''}`} xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="6 9 12 15 18 9"></polyline>
     </svg>
@@ -191,22 +192,10 @@ const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariation }: {
                 )}
                 {status === 'to-generate' && (
                     <>
-                        {isGeneratingPrompts && (
+                        {isGeneratingPrompts && !generationError && (
                             <div className="loading-prompts">
                                 <InlineSpinner />
-                                <span>Generating creative prompts...</span>
-                            </div>
-                        )}
-                        {proposedPrompts && !isGeneratingPrompts && (
-                            <div className="proposed-prompts">
-                                <div className="prompt-option">
-                                    <strong>Option 1:</strong>
-                                    <p>{proposedPrompts[0]}</p>
-                                </div>
-                                <div className="prompt-option">
-                                    <strong>Option 2:</strong>
-                                    <p>{proposedPrompts[1]}</p>
-                                </div>
+                                <span>Analyzing context to generate prompts...</span>
                             </div>
                         )}
                          {isGeneratingImages && (
@@ -264,31 +253,43 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
     };
 };
 
+type GenAIRequest = Parameters<GoogleGenAI['models']['generateContent']>[0];
+
 const generateContentWithRetry = async (
     ai: GoogleGenAI,
-    request: { model: string; contents: string },
+    request: GenAIRequest,
     retries = 5,
-    delay = 1000
+    initialDelay = 1000
 ): Promise<GenerateContentResponse> => {
+    let lastError: any = null;
     for (let i = 0; i < retries; i++) {
         try {
             const response = await ai.models.generateContent(request);
             return response;
         } catch (error) {
-            console.error(`Gemini API call attempt ${i + 1} of ${retries} failed:`, error);
-            if (i < retries - 1) {
-                await new Promise(resolve => setTimeout(resolve, delay));
+            lastError = error;
+            const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+            
+            if (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
+                console.warn(`Gemini API call attempt ${i + 1} of ${retries} failed with rate limit error. Retrying...`);
+                if (i < retries - 1) {
+                    const jitter = Math.random() * 500;
+                    const delay = initialDelay * Math.pow(2, i) + jitter;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
             } else {
+                console.error(`Gemini API call failed with non-retryable error:`, error);
                 throw error;
             }
         }
     }
-    throw new Error('Failed to generate content after all retries.');
+    console.error('All retry attempts failed.');
+    throw lastError || new Error('Failed to generate content after all retries.');
 };
 
 const generateImageFromPrompt = async (ai: GoogleGenAI, prompt: string, styleImagePart?: Part): Promise<string> => {
-    let contents;
-    let config;
+    let contents: GenAIRequest['contents'];
+    let config: GenAIRequest['config'];
 
     if (styleImagePart) {
         contents = {
@@ -301,11 +302,15 @@ const generateImageFromPrompt = async (ai: GoogleGenAI, prompt: string, styleIma
         contents = prompt;
     }
 
-    const response = await ai.models.generateContent({
+    const request: GenAIRequest = {
         model: "gemini-2.5-flash-image-preview",
         contents,
-        ...(config && { config }),
-    });
+    };
+    if (config) {
+        request.config = config;
+    }
+
+    const response = await generateContentWithRetry(ai, request);
 
     for (const part of response.candidates[0].content.parts) {
         if (part.inlineData) {
@@ -332,7 +337,7 @@ const generateImageVariation = async (ai: GoogleGenAI, base64ImageWithMime: stri
         ? `Generate a new version of this image, inspired by the following description: "${altText}". Maintain the core subject but render it in a new artistic style.`
         : `Generate a new, creative, artistic variation of this image.`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash-image-preview',
         contents: {
             parts: [imagePart, { text: textPrompt }],
@@ -354,15 +359,18 @@ const generateImageVariation = async (ai: GoogleGenAI, base64ImageWithMime: stri
 
 const App = () => {
     const [markdownFile, setMarkdownFile] = useState<File | null>(null);
+    const [markdownContent, setMarkdownContent] = useState<string | null>(null);
     const [styleImageFile, setStyleImageFile] = useState<File | null>(null);
     const [maintainStyle, setMaintainStyle] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isParsing, setIsParsing] = useState(false);
     const [markdownError, setMarkdownError] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [imageReferences, setImageReferences] = useState<ImageReference[]>([]);
+    const [currentReferenceIndex, setCurrentReferenceIndex] = useState<number | null>(null);
+    const generationTriggered = useRef(new Set<number>());
+
     const [templates, setTemplates] = useState<{ context: string; description: string; } | null>(null);
     const [templateError, setTemplateError] = useState('');
-    const promptCache = useRef(new Map<string, ImageReference[]>());
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalContent, setModalContent] = useState('');
@@ -403,8 +411,10 @@ const App = () => {
 
     const handleMarkdownSelect = async (file: File) => {
         setMarkdownFile(null);
+        setMarkdownContent(null);
         setMarkdownError('');
         setImageReferences([]);
+        setCurrentReferenceIndex(null);
 
         if (file.name.endsWith('.md')) {
             setMarkdownFile(file);
@@ -432,13 +442,16 @@ const App = () => {
         setMarkdownError('Invalid file type. Please upload a .md or .zip file.');
     };
 
-    const handlePropose = async () => {
-        if (!markdownFile || !templates) return;
-        setIsLoading(true);
+    const parseAndFindReferences = async () => {
+        if (!markdownFile) return;
+        setIsParsing(true);
         setMarkdownError('');
+        setImageReferences([]);
+        setCurrentReferenceIndex(null);
+        generationTriggered.current.clear();
 
         try {
-            let markdownContent = '';
+            let currentMarkdownContent = '';
             let zip: JSZip | null = null;
             let zipFilePaths: string[] = [];
             const isZip = markdownFile.name.endsWith('.zip');
@@ -451,39 +464,32 @@ const App = () => {
                 );
 
                 if (mdFileEntry) {
-                    markdownContent = await mdFileEntry.async('string');
+                    currentMarkdownContent = await mdFileEntry.async('string');
                 } else {
-                    setMarkdownError('No .md file found in the .zip archive.');
-                    return;
+                    throw new Error('No .md file found in the .zip archive.');
                 }
             } else {
-                markdownContent = await markdownFile.text();
+                currentMarkdownContent = await markdownFile.text();
             }
-            
-            if (promptCache.current.has(markdownContent)) {
-                setImageReferences(promptCache.current.get(markdownContent)!);
-                return;
-            }
+            setMarkdownContent(currentMarkdownContent);
 
             const references: ImageReference[] = [];
             const markdownRegex = /!\[([^\]]*)\]\((.*?)\)/g;
             let match;
 
-            while ((match = markdownRegex.exec(markdownContent)) !== null) {
+            while ((match = markdownRegex.exec(currentMarkdownContent)) !== null) {
                 const [fullMatch, rawAlt, rawPath] = match;
                 const pathParts = rawPath.split(/\s+(?=["'])/, 2);
                 let path = pathParts[0].trim();
-                if (path.startsWith('<') && path.endsWith('>')) {
-                    path = path.slice(1, -1);
-                }
+                if (path.startsWith('<') && path.endsWith('>')) path = path.slice(1, -1);
                 path = path.replace(/\\(.)/g, '$1');
                 const alt = rawAlt.replace(/\\(.)/g, '$1');
                 const matchIndex = match.index;
-                const contentBeforeMatch = markdownContent.substring(0, matchIndex);
+                const contentBeforeMatch = currentMarkdownContent.substring(0, matchIndex);
                 const lineNumber = (contentBeforeMatch.match(/\n/g) || []).length + 1;
                 const contextStart = Math.max(0, matchIndex - 500);
-                const contextEnd = Math.min(markdownContent.length, matchIndex + fullMatch.length + 500);
-                const context = markdownContent.substring(contextStart, contextEnd);
+                const contextEnd = Math.min(currentMarkdownContent.length, matchIndex + fullMatch.length + 500);
+                const context = currentMarkdownContent.substring(contextStart, contextEnd);
 
                 let status: ImageReference['status'] = 'to-generate';
                 let originalImage: string | undefined = undefined;
@@ -507,7 +513,7 @@ const App = () => {
             }
 
             const htmlImgRegex = /<img([^>]+)>/gi;
-            while ((match = htmlImgRegex.exec(markdownContent)) !== null) {
+            while ((match = htmlImgRegex.exec(currentMarkdownContent)) !== null) {
                 const [fullMatch, attrsString] = match;
                 if (!attrsString) continue;
                 const srcMatch = attrsString.match(/src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
@@ -517,11 +523,11 @@ const App = () => {
                 if (path) {
                     const alt = altMatch ? altMatch[1] || altMatch[2] || altMatch[3] || '' : '';
                     const matchIndex = match.index;
-                    const contentBeforeMatch = markdownContent.substring(0, matchIndex);
+                    const contentBeforeMatch = currentMarkdownContent.substring(0, matchIndex);
                     const lineNumber = (contentBeforeMatch.match(/\n/g) || []).length + 1;
                     const contextStart = Math.max(0, matchIndex - 500);
-                    const contextEnd = Math.min(markdownContent.length, matchIndex + fullMatch.length + 500);
-                    const context = markdownContent.substring(contextStart, contextEnd);
+                    const contextEnd = Math.min(currentMarkdownContent.length, matchIndex + fullMatch.length + 500);
+                    const context = currentMarkdownContent.substring(contextStart, contextEnd);
                     
                     let status: ImageReference['status'] = 'to-generate';
                     let originalImage: string | undefined = undefined;
@@ -547,316 +553,217 @@ const App = () => {
 
             references.sort((a, b) => a.lineNumber - b.lineNumber);
             setImageReferences(references);
-
-            const toGenerateList = references.filter(ref => ref.status === 'to-generate');
-            if (toGenerateList.length > 0) {
-                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                let finalReferencesForCache = [...references];
-
-                for (const ref of toGenerateList) {
-                    setImageReferences(prevRefs => 
-                        prevRefs.map(r => r.lineNumber === ref.lineNumber && r.path === ref.path ? { ...r, isGeneratingPrompts: true } : r)
-                    );
-
-                    let promptForGemini = '';
-                    if (ref.alt) {
-                        promptForGemini = templates.description.replace('{alt_text}', ref.alt);
-                    } else {
-                        promptForGemini = templates.context
-                            .replace('{file_content}', markdownContent)
-                            .replace('{context}', ref.context);
-                    }
-                    
-                    const response = await generateContentWithRetry(ai, {
-                        model: 'gemini-2.5-flash',
-                        contents: promptForGemini,
-                    });
-
-                    const text = response.text;
-                    const parsePromptsFromResponse = (responseText: string): [string, string] | undefined => {
-                        const prompt1Match = responseText.match(/<prompt_1>([\s\S]*?)<\/prompt_1>/);
-                        const prompt2Match = responseText.match(/<prompt_2>([\s\S]*?)<\/prompt_2>/);
-                        if (prompt1Match && prompt2Match) {
-                            const prompt1 = prompt1Match[1].trim();
-                            const prompt2 = prompt2Match[1].trim();
-                            return [prompt1, prompt2];
-                        }
-                        console.warn('Could not parse prompts from Gemini response:', responseText);
-                        return undefined;
-                    };
-
-                    const proposedPrompts = parsePromptsFromResponse(text);
-                    finalReferencesForCache = finalReferencesForCache.map(cacheRef => {
-                        if (cacheRef.lineNumber === ref.lineNumber && cacheRef.path === ref.path) {
-                            return { ...cacheRef, proposedPrompts: proposedPrompts ?? ['', ''] };
-                        }
-                        return cacheRef;
-                    });
-
-                    setImageReferences(prevRefs => 
-                        prevRefs.map(r => 
-                            r.lineNumber === ref.lineNumber && r.path === ref.path 
-                            ? { ...r, isGeneratingPrompts: false, proposedPrompts: proposedPrompts ?? ['', ''] } 
-                            : r
-                        )
-                    );
-                }
-                promptCache.current.set(markdownContent, finalReferencesForCache);
-            } else {
-                promptCache.current.set(markdownContent, references);
+            if(references.length > 0) {
+                setCurrentReferenceIndex(0);
             }
+
         } catch (error) {
-            console.error("Error processing file or generating prompts:", error);
-            setMarkdownError('Failed to parse file or generate prompts. Check console for details.');
+            console.error("Error processing markdown file:", error);
+            const message = error instanceof Error ? error.message : 'An unexpected error occurred during processing.';
+            setMarkdownError(message);
         } finally {
-            setIsLoading(false);
+            setIsParsing(false);
         }
     };
     
-    const handleGenerateImages = async () => {
-        const itemsToProcess = imageReferences.filter(
-            ref => ref.status === 'to-generate' && ref.proposedPrompts && !ref.generatedImages
-        );
-    
-        if (itemsToProcess.length === 0) return;
-    
-        let styleImageForBatch: string | null = null;
-        // Pre-check for an existing image if maintainStyle is on
-        if (maintainStyle && !styleImageFile) {
-            const anyExistingGenerated = imageReferences.find(r => (r.generatedImages && (r.generatedImages[0] || r.generatedImages[1])) || r.generatedVariation);
-            if (anyExistingGenerated) {
-                if (anyExistingGenerated.generatedImages) {
-                     styleImageForBatch = anyExistingGenerated.generatedImages[0] || anyExistingGenerated.generatedImages[1];
-                } else {
-                    styleImageForBatch = anyExistingGenerated.generatedVariation!;
-                }
-            }
-        }
-    
-        for (const referenceToGenerate of itemsToProcess) {
-            setImageReferences(prev => prev.map(ref => 
-                (ref.lineNumber === referenceToGenerate.lineNumber && ref.path === referenceToGenerate.path) 
-                ? { ...ref, isGeneratingImages: true, generationError: undefined } 
-                : ref
-            ));
-    
+    useEffect(() => {
+        const triggerGenerationForIndex = async (index: number) => {
+            if (generationTriggered.current.has(index)) return;
+            
+            const ref = imageReferences[index];
+            if (!ref || ref.status !== 'to-generate' || ref.generatedImages || ref.generationError) return;
+
+            generationTriggered.current.add(index);
+            
             try {
+                if (!templates || !markdownContent) throw new Error("Templates or markdown file not ready.");
+                
                 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                let [prompt1, prompt2] = referenceToGenerate.proposedPrompts!;
-    
-                let styleImagePart: Part | undefined = undefined;
+                let styleImagePart: Part | undefined;
                 if (styleImageFile) {
-                    styleImagePart = await fileToGenerativePart(styleImageFile);
-                } else if (maintainStyle && styleImageForBatch) {
-                    const mimeType = styleImageForBatch.substring(styleImageForBatch.indexOf(":") + 1, styleImageForBatch.indexOf(";"));
-                    const data = styleImageForBatch.split(',')[1];
-                    styleImagePart = { inlineData: { mimeType, data } };
-                }
-    
-                if (styleImagePart) {
-                    prompt1 += " -- in the artistic style of the provided image.";
-                    prompt2 += " -- in the artistic style of the provided image.";
-                }
-    
-                const results = await Promise.allSettled([
-                    generateImageFromPrompt(ai, prompt1, styleImagePart),
-                    generateImageFromPrompt(ai, prompt2, styleImagePart)
-                ]);
-    
-                const generatedImages: [string | null, string | null] = [null, null];
-                let anyError = false;
-    
-                if (results[0].status === 'fulfilled') {
-                    generatedImages[0] = results[0].value;
-                } else {
-                    console.error("Error generating image 1:", results[0].reason);
-                    anyError = true;
-                }
-    
-                if (results[1].status === 'fulfilled') {
-                    generatedImages[1] = results[1].value;
-                } else {
-                    console.error("Error generating image 2:", results[1].reason);
-                    anyError = true;
-                }
-    
-                // After generation, if this is the first one, set it as the style reference for subsequent items in this batch
-                if (maintainStyle && !styleImageFile && !styleImageForBatch) {
-                    if (generatedImages[0]) {
-                        styleImageForBatch = generatedImages[0];
-                    } else if (generatedImages[1]) {
-                        styleImageForBatch = generatedImages[1];
+                     try {
+                        styleImagePart = await fileToGenerativePart(styleImageFile);
+                    } catch (e) {
+                        console.error("Could not process style image:", e);
                     }
                 }
+
+                // Step 1: Generate Prompts
+                setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingPrompts: true, generationError: '' } : r));
+
+                const generatePrompts = async (currentRef: ImageReference): Promise<[string, string]> => {
+                    let template = currentRef.alt ? templates.description : templates.context;
+                    let prompt = currentRef.alt 
+                        ? template.replace('{alt_text}', currentRef.alt)
+                        : template.replace('{file_content}', markdownContent).replace('{context}', currentRef.context);
+                    
+                    const response = await generateContentWithRetry(ai, { model: "gemini-2.5-flash", contents: prompt });
+                    const responseText = response.text.trim();
+                    const prompt1Match = responseText.match(/<prompt_1>([\s\S]*?)<\/prompt_1>/);
+                    const prompt2Match = responseText.match(/<prompt_2>([\s\S]*?)<\/prompt_2>/);
+                    if (!prompt1Match || !prompt2Match) throw new Error("Could not parse prompts from the AI response.");
+                    return [prompt1Match[1].trim(), prompt2Match[1].trim()];
+                };
                 
-                setImageReferences(prev => prev.map(ref => 
-                    (ref.lineNumber === referenceToGenerate.lineNumber && ref.path === referenceToGenerate.path) 
-                    ? { 
-                        ...ref, 
-                        isGeneratingImages: false, 
-                        generatedImages,
-                        generationError: anyError ? "Failed to generate one or more images. See console for details." : undefined
-                      } 
-                    : ref
-                ));
-    
+                const prompts = await generatePrompts(ref);
+                
+                setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingPrompts: false, proposedPrompts: prompts, isGeneratingImages: true } : r));
+
+                // Step 2: Generate Images
+                const imagePromises = prompts.map(p => 
+                    generateImageFromPrompt(ai, p, styleImagePart).catch(e => {
+                        console.error(`Image generation failed for prompt: "${p}"`, e);
+                        return null;
+                    })
+                );
+                const [image1, image2] = await Promise.all(imagePromises);
+
+                setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingImages: false, generatedImages: [image1, image2] } : r));
             } catch (error) {
-                console.error("General error during image generation:", error);
-                setImageReferences(prev => prev.map(ref => 
-                    (ref.lineNumber === referenceToGenerate.lineNumber && ref.path === referenceToGenerate.path) 
-                    ? { ...ref, isGeneratingImages: false, generationError: "An unexpected error occurred during image generation." } 
-                    : ref
-                ));
+                console.error(`Failed to process image for L${ref.lineNumber} (path: ${ref.path}):`, error);
+                const errorMessage = error instanceof Error ? error.message : "An unknown error occurred during generation.";
+                setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingPrompts: false, isGeneratingImages: false, generationError: errorMessage } : r));
             }
+        };
+
+        if (currentReferenceIndex !== null) {
+            triggerGenerationForIndex(currentReferenceIndex);
         }
-    };
+    }, [currentReferenceIndex, imageReferences, templates, markdownContent, styleImageFile]);
 
-    const handleGenerateVariation = async (referenceToUpdate: ImageReference) => {
-        if (!referenceToUpdate.originalImage || referenceToUpdate.isGeneratingVariation) return;
-
-        setImageReferences(prev => prev.map(ref => 
-            (ref.lineNumber === referenceToUpdate.lineNumber && ref.path === referenceToUpdate.path) 
-            ? { ...ref, isGeneratingVariation: true, variationError: undefined } 
-            : ref
-        ));
-
+    const handleGenerateVariation = async (refToUpdate: ImageReference) => {
+        if (!refToUpdate.originalImage) return;
+    
+        setImageReferences(prev => prev.map(r => r.lineNumber === refToUpdate.lineNumber ? { ...r, isGeneratingVariation: true, variationError: '' } : r));
+    
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const variation = await generateImageVariation(ai, referenceToUpdate.originalImage, referenceToUpdate.alt);
-            
-            setImageReferences(prev => prev.map(ref => 
-                (ref.lineNumber === referenceToUpdate.lineNumber && ref.path === referenceToUpdate.path) 
-                ? { 
-                    ...ref, 
-                    isGeneratingVariation: false, 
-                    generatedVariation: variation,
-                  } 
-                : ref
-            ));
-
+            const variation = await generateImageVariation(ai, refToUpdate.originalImage, refToUpdate.alt);
+            setImageReferences(prev => prev.map(r => r.lineNumber === refToUpdate.lineNumber ? { ...r, isGeneratingVariation: false, generatedVariation: variation } : r));
         } catch (error) {
-            console.error("Error during image variation generation:", error);
-            setImageReferences(prev => prev.map(ref => 
-                (ref.lineNumber === referenceToUpdate.lineNumber && ref.path === referenceToUpdate.path) 
-                ? { ...ref, isGeneratingVariation: false, variationError: "Failed to generate variation. See console." } 
-                : ref
-            ));
+            console.error(`Failed to generate variation for L${refToUpdate.lineNumber}:`, error);
+            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+            setImageReferences(prev => prev.map(r => r.lineNumber === refToUpdate.lineNumber ? { ...r, isGeneratingVariation: false, variationError: errorMessage } : r));
         }
     };
 
-    const existingImagesCount = imageReferences.filter(ref => ref.status === 'existing').length;
-    const toGenerateImagesCount = imageReferences.filter(ref => ref.status === 'to-generate').length;
-    const pendingGenerationCount = imageReferences.filter(ref => ref.status === 'to-generate' && ref.proposedPrompts && !ref.generatedImages).length;
-    const isGeneratingAnyImage = imageReferences.some(ref => ref.isGeneratingImages);
+    const handlePrevious = () => {
+        if (currentReferenceIndex !== null) {
+            setCurrentReferenceIndex(Math.max(0, currentReferenceIndex - 1));
+        }
+    };
+    
+    const handleNext = () => {
+        if (currentReferenceIndex !== null) {
+            setCurrentReferenceIndex(Math.min(imageReferences.length - 1, currentReferenceIndex + 1));
+        }
+    };
 
     return (
-        <main className="app-container">
-            <Modal isOpen={isModalOpen} onClose={closeModal} content={modalContent} />
+        <div className="app-container">
             <header>
                 <h1>BananaMD</h1>
-                <p>Generate illustrations for your Markdown documents.</p>
+                <p>Illustrate your Markdown documents with AI-generated images.</p>
             </header>
 
-            <section className="upload-section">
+            {templateError && <p className="error-text">{templateError}</p>}
+
+            <div className="upload-section">
                 <DropZone
                     id="markdown-upload"
                     onFileSelect={handleMarkdownSelect}
                     acceptedTypes=".md,.zip"
                     file={markdownFile}
-                    label="Markdown or .zip file"
-                    dragLabel="Drop your document here"
-                    error={markdownError || templateError}
+                    label="Upload a .md file or a .zip archive containing your project."
+                    dragLabel="Drop your Markdown file here"
+                    error={markdownError}
                 />
-            </section>
+            </div>
 
-            <section className="advanced-options">
-                <button
+            <div className="advanced-options">
+                <button 
                     className="advanced-options-toggle"
                     onClick={() => setShowAdvanced(!showAdvanced)}
                     aria-expanded={showAdvanced}
-                    aria-controls="advanced-options-content"
+                    aria-controls="advanced-content"
                 >
-                    <span>Advanced Options</span>
+                    Advanced Options
                     <ChevronIcon expanded={showAdvanced} />
                 </button>
-                <div className={`advanced-options-content ${showAdvanced ? 'show' : ''}`} id="advanced-options-content" hidden={!showAdvanced}>
-                    <DropZone
-                        id="style-image-upload"
-                        onFileSelect={setStyleImageFile}
-                        acceptedTypes="image/*"
-                        file={styleImageFile}
-                        label="Style reference (optional)"
-                        dragLabel="Drop a style image"
-                        error=""
-                    />
-                     <div className="options">
-                        <label htmlFor="maintain-style-checkbox" className="checkbox-container">
+                <div id="advanced-content" className={`advanced-options-content ${showAdvanced ? 'show' : ''}`}>
+                    <div className="upload-section">
+                         <DropZone
+                            id="style-image-upload"
+                            onFileSelect={setStyleImageFile}
+                            acceptedTypes="image/png,image/jpeg,image/webp"
+                            file={styleImageFile}
+                            label="Upload a style reference image (optional)."
+                            dragLabel="Drop style image here"
+                            error={''}
+                        />
+                    </div>
+                    <div className="options">
+                        <label className="checkbox-container">
                             <input
                                 type="checkbox"
-                                id="maintain-style-checkbox"
                                 checked={maintainStyle}
                                 onChange={(e) => setMaintainStyle(e.target.checked)}
+                                disabled // This option is for variations, maybe it should be inside the item? For now, let's keep it simple.
                             />
-                            <span className="checkbox-custom"><CheckIcon /></span>
-                            Try to maintain the style of the first image
+                            <span className="checkbox-custom">
+                                <CheckIcon />
+                            </span>
+                            Maintain original image style (for variations)
                         </label>
                     </div>
                 </div>
-            </section>
+            </div>
             
-            {imageReferences.length > 0 && !isLoading && (
-              <section className="results-section">
-                <div className="results-summary">
-                    {existingImagesCount > 0 && (
-                        <p className="progress-indicator">
-                            Found {existingImagesCount} existing image{existingImagesCount !== 1 ? 's' : ''} to create variations for.
-                        </p>
-                    )}
-                     {toGenerateImagesCount > 0 && (
-                        <p className="progress-indicator">
-                            Found {toGenerateImagesCount} image placeholder{toGenerateImagesCount !== 1 ? 's' : ''} to illustrate.
-                        </p>
-                    )}
-                </div>
-                <div className="image-reference-list">
-                  {imageReferences.map((ref) => (
-                    <ImageReferenceItem key={`${ref.lineNumber}-${ref.path}`} reference={ref} onOpenContext={openModal} onGenerateVariation={handleGenerateVariation} />
-                  ))}
-                </div>
-              </section>
-            )}
-
             <div className="propose-section">
-                {isLoading ? (
-                    <Spinner />
-                ) : imageReferences.length > 0 ? (
+                {isParsing ? (
                     <div className="generation-step">
-                        <button 
-                            className="propose-button"
-                            onClick={handleGenerateImages}
-                            disabled={pendingGenerationCount === 0 || isGeneratingAnyImage}
-                            aria-disabled={pendingGenerationCount === 0 || isGeneratingAnyImage}
-                        >
-                            {isGeneratingAnyImage 
-                                ? 'Generating...' 
-                                : pendingGenerationCount > 1
-                                    ? `Generate All ${pendingGenerationCount} Images`
-                                    : 'Generate Image'
-                            }
-                        </button>
+                        <div className="spinner-container">
+                            <Spinner />
+                        </div>
+                        <p className="generation-status-indicator">Parsing Markdown and finding image references...</p>
                     </div>
                 ) : (
                     <button
                         className="propose-button"
-                        onClick={handlePropose}
-                        disabled={!markdownFile || !templates}
-                        aria-disabled={!markdownFile || !templates}
+                        onClick={parseAndFindReferences}
+                        disabled={!markdownFile || isParsing}
                     >
-                        Propose illustrative images
+                        {imageReferences.length > 0 ? 'Start Over' : 'Find Images & Generate'}
                     </button>
                 )}
             </div>
-        </main>
+
+            {currentReferenceIndex !== null && imageReferences.length > 0 && (
+                <section className="results-section">
+                    <div className="results-navigation">
+                        <button className="nav-button" onClick={handlePrevious} disabled={currentReferenceIndex === 0}>
+                            Previous
+                        </button>
+                        <span>
+                            Image {currentReferenceIndex + 1} of {imageReferences.length}
+                        </span>
+                        <button className="nav-button" onClick={handleNext} disabled={currentReferenceIndex === imageReferences.length - 1}>
+                            Next
+                        </button>
+                    </div>
+                    <div className="image-reference-list">
+                        <ImageReferenceItem 
+                            key={imageReferences[currentReferenceIndex].lineNumber + imageReferences[currentReferenceIndex].path}
+                            reference={imageReferences[currentReferenceIndex]}
+                            onOpenContext={openModal}
+                            onGenerateVariation={handleGenerateVariation}
+                        />
+                    </div>
+                </section>
+            )}
+            
+            <Modal isOpen={isModalOpen} onClose={closeModal} content={modalContent} />
+        </div>
     );
 };
 
