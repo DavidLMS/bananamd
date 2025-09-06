@@ -1,0 +1,313 @@
+:root {
+  --banana-yellow: #FFD700;
+  --pale-yellow: #FFFACD;
+  --dark-text: #212529;
+  --light-text: #6c757d;
+  --border-color: #dee2e6;
+  --background-color: #f7f8fa;
+  --card-background: #ffffff;
+  --disabled-bg: #e9ecef;
+  --disabled-text: #6c757d;
+  --error-red: #e53e3e;
+  --pale-red: #fff5f5;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--background-color);
+  color: var(--dark-text);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+.app-container {
+  width: 100%;
+  max-width: 800px;
+  background-color: var(--card-background);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  padding: 2.5rem;
+  text-align: center;
+}
+
+header {
+  margin-bottom: 2rem;
+}
+
+h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+header p {
+  font-size: 1.1rem;
+  color: var(--light-text);
+  margin-top: 0.5rem;
+}
+
+.upload-section {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-bottom: 1.5rem;
+}
+
+.drop-zone {
+  border: 2px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+  background-color: #f8f9fa;
+  min-height: 180px;
+  position: relative;
+}
+
+.drop-zone.drag-over {
+  background-color: var(--pale-yellow);
+  border-color: var(--banana-yellow);
+}
+
+.drop-zone:hover {
+  border-color: var(--banana-yellow);
+}
+
+.drop-zone.has-error {
+  border-color: var(--error-red);
+  background-color: var(--pale-red);
+}
+
+.drop-zone.has-error:hover {
+  border-color: var(--error-red);
+}
+
+.drop-zone input[type="file"] {
+  display: none;
+}
+
+.drop-zone-icon {
+  width: 48px;
+  height: 48px;
+  stroke: var(--light-text);
+  margin-bottom: 1rem;
+  transition: stroke 0.2s ease-in-out;
+}
+
+.drop-zone:hover .drop-zone-icon {
+    stroke: var(--banana-yellow);
+}
+
+.drop-zone-text {
+  color: var(--light-text);
+  font-weight: 500;
+}
+
+.drop-zone-text span {
+  color: var(--banana-yellow);
+  font-weight: 700;
+}
+
+.file-name {
+  font-weight: 500;
+  word-break: break-all;
+  padding: 0 1rem;
+}
+
+.error-text {
+  color: var(--error-red);
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-top: 1rem;
+}
+
+.advanced-options {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  overflow: hidden;
+  background-color: var(--background-color);
+  transition: border-color 0.2s ease;
+}
+
+.advanced-options-toggle {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  padding: 1rem 1.5rem;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--dark-text);
+  transition: background-color 0.2s ease, border-color 0.4s ease;
+}
+
+.advanced-options-toggle:hover {
+  background-color: rgba(0,0,0,0.02);
+}
+
+.advanced-options-toggle[aria-expanded="true"] {
+   border-bottom-color: var(--border-color);
+}
+
+.chevron-icon {
+  stroke: var(--light-text);
+  transition: transform 0.3s ease-in-out;
+}
+
+.advanced-options-toggle:hover .chevron-icon {
+    stroke: var(--dark-text);
+}
+
+.chevron-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.advanced-options-content {
+  background-color: var(--card-background);
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease-out, padding 0.4s ease-out;
+  padding: 0 1.5rem;
+}
+
+.advanced-options-content.show {
+  max-height: 500px;
+  padding: 1.5rem;
+}
+
+.options {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 1.5rem;
+  margin-bottom: 0;
+}
+
+.checkbox-container {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: var(--dark-text);
+}
+
+.checkbox-container input {
+  display: none;
+}
+
+.checkbox-custom {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 4px;
+  margin-right: 0.75rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.checkbox-custom .tick {
+  display: none;
+  width: 12px;
+  height: 12px;
+}
+
+.checkbox-container input:checked + .checkbox-custom {
+  background-color: var(--banana-yellow);
+  border-color: var(--banana-yellow);
+}
+
+.checkbox-container input:checked + .checkbox-custom .tick {
+  display: block;
+}
+
+.propose-section {
+  min-height: 54px; /* Matches button height to prevent layout shift */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.propose-button {
+  background-color: var(--banana-yellow);
+  color: var(--dark-text);
+  border: none;
+  border-radius: 8px;
+  padding: 0.9rem 2rem;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  width: 100%;
+  max-width: 400px;
+}
+
+.propose-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4);
+}
+
+.propose-button:disabled {
+  background-color: var(--disabled-bg);
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+.spinner-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.spinner {
+  border: 4px solid var(--disabled-bg);
+  border-top: 4px solid var(--banana-yellow);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1.5rem;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+  
+  header p {
+    font-size: 1rem;
+  }
+
+  .advanced-options-toggle {
+    padding: 1rem;
+  }
+
+  .advanced-options-content.show {
+    padding: 1.5rem 1rem;
+  }
+}
