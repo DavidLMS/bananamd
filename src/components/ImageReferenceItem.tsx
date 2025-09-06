@@ -17,6 +17,10 @@ export interface ImageReference {
     generatedImages?: [string | null, string | null];
     generationError?: string;
     originalImage?: string;
+    // Existing image flow
+    isGeneratingImproved?: boolean;
+    generatedImproved?: string | null;
+    improvedError?: string;
     isGeneratingVariation?: boolean;
     generatedVariation?: string | null;
     variationError?: string;
@@ -129,15 +133,17 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                 {status === 'existing' && (
                     <div className="existing-image-container">
                         <div className="image-column">
-                            <h4 className="column-label">Original</h4>
-                            {originalImage ? (
+                            <h4 className="column-label">Improved</h4>
+                            {reference.isGeneratingImproved ? (
+                                <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Improving image"></div>
+                            ) : (reference.generatedImproved || originalImage) ? (
                                 <>
                                     <div className={`generated-image-wrapper ${reference.selectedIndex === 0 ? 'selected' : ''}`} onClick={() => onSelect(0)}>
                                         {renderVersionBadge(histories?.[0])}
                                         {renderNavArrows(histories?.[0], 0)}
                                     <img
-                                        src={histories?.[0] ? histories[0]!.nodes[histories[0]!.currentId].imageData : originalImage}
-                                        alt="Original image"
+                                        src={histories?.[0] ? histories[0]!.nodes[histories[0]!.currentId].imageData : (reference.generatedImproved || originalImage)!}
+                                        alt="Improved image"
                                         className="generated-image"
                                         onError={() => onImageError(0)}
                                     />
@@ -149,6 +155,7 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                     Cannot load image.
                                 </div>
                             )}
+                            {reference.improvedError && <p className="generation-error small">{reference.improvedError}</p>}
                         </div>
                         <div className="image-column">
                              <h4 className="column-label">AI Variation</h4>
@@ -170,9 +177,7 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                 </>
                              ) : (
                                  <div className="generated-image-wrapper variation-placeholder">
-                                     <button className="generate-variation-button" onClick={() => onGenerateVariation(reference)}>
-                                         Generate Variation
-                                     </button>
+                                     <span>Preparing variation…</span>
                                  </div>
                              )}
                              {variationError && <p className="generation-error small">{variationError}</p>}

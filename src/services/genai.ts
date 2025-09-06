@@ -51,7 +51,10 @@ export const generateContentWithRetry = async (
 
 export const generateImageFromPrompt = async (ai: GoogleGenAI, prompt: string, styleImagePart?: Part): Promise<string> => {
     // Always request image modality and provide a structured content payload
-    const parts: Part[] = styleImagePart ? [{ text: prompt }, styleImagePart] : [{ text: prompt }];
+    const styledPrompt = styleImagePart
+        ? `${prompt}\n\nTransform the described scene into the artistic style of the attached reference image. Preserve the described composition, but render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).`
+        : prompt;
+    const parts: Part[] = styleImagePart ? [{ text: styledPrompt }, styleImagePart] : [{ text: styledPrompt }];
     const request: GenAIRequest = {
         model: "gemini-2.5-flash-image-preview",
         contents: { parts },
@@ -66,7 +69,7 @@ export const generateImageFromPrompt = async (ai: GoogleGenAI, prompt: string, s
     throw new Error("API did not return an image. It may have refused the prompt.");
 };
 
-export const generateImageVariation = async (ai: GoogleGenAI, base64ImageWithMime: string, altText: string): Promise<string> => {
+export const generateImageVariation = async (ai: GoogleGenAI, base64ImageWithMime: string, altText: string, styleImagePart?: Part): Promise<string> => {
     const mimeType = base64ImageWithMime.substring(base64ImageWithMime.indexOf(":") + 1, base64ImageWithMime.indexOf(";"));
     const data = base64ImageWithMime.split(',')[1];
 
@@ -77,14 +80,12 @@ export const generateImageVariation = async (ai: GoogleGenAI, base64ImageWithMim
         },
     };
     
-    const textPrompt = altText 
-        ? `Generate a new version of this image, inspired by the following description: "${altText}". Maintain the core subject but render it in a new artistic style.`
-        : `Generate a new, creative, artistic variation of this image.`;
+    let textPrompt = `Transform the provided image into the artistic style of the attached reference image. Preserve the original composition and subject${altText ? ` described as: "${altText}"` : ''}, and render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).`;
 
     const response = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash-image-preview',
         contents: {
-            parts: [imagePart, { text: textPrompt }],
+            parts: styleImagePart ? [imagePart, styleImagePart, { text: textPrompt }] : [imagePart, { text: textPrompt }],
         },
         config: {
             responseModalities: [Modality.IMAGE, Modality.TEXT],
@@ -165,7 +166,8 @@ export const generateEditedImage = async (
     ai: GoogleGenAI,
     branchKey: string,
     currentImageDataUrl: string,
-    instruction: string
+    instruction: string,
+    styleImagePart?: Part
 ): Promise<string> => {
     const { mode, chat, baseImagePart } = await ensureChatForBranch(ai, branchKey, currentImageDataUrl);
 
@@ -177,7 +179,13 @@ export const generateEditedImage = async (
         const response = await generateContentWithRetry(ai, {
             model: 'gemini-2.5-flash-image-preview',
             contents: {
-                parts: [dataUrlToPart(currentImageDataUrl), { text: instruction }],
+                parts: styleImagePart
+                    ? [
+                        dataUrlToPart(currentImageDataUrl),
+                        styleImagePart,
+                        { text: `${instruction}\n\nTransform the current image into the artistic style of the attached reference image. Preserve the existing composition and subject, but render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).` }
+                      ]
+                    : [dataUrlToPart(currentImageDataUrl), { text: instruction }],
             },
             config: {
                 responseModalities: [Modality.IMAGE, Modality.TEXT],
@@ -196,7 +204,16 @@ export const generateEditedImage = async (
 
     if (mode === 'chat' && chat) {
         const response = await chat
-            .sendMessage({ message: instruction, parts: [baseImagePart, { text: instruction }] })
+            .sendMessage({
+                message: instruction,
+                parts: styleImagePart
+                    ? [
+                        baseImagePart,
+                        styleImagePart,
+                        { text: `${instruction}\n\nTransform the current image into the artistic style of the attached reference image. Preserve the existing composition and subject, but render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).` }
+                      ]
+                    : [baseImagePart, { text: instruction }]
+            })
             .catch(() => null as any);
         if (response?.candidates) {
             const img = extractImageFromCandidates(response.candidates as any[]);
@@ -209,7 +226,13 @@ export const generateEditedImage = async (
     const response = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash-image-preview',
         contents: {
-            parts: [dataUrlToPart(currentImageDataUrl), { text: instruction }],
+            parts: styleImagePart
+                ? [
+                    dataUrlToPart(currentImageDataUrl),
+                    styleImagePart,
+                    { text: `${instruction}\n\nTransform the current image into the artistic style of the attached reference image. Preserve the existing composition and subject, but render all elements with the reference image's stylistic characteristics (palette, brushwork, line quality, textures).` }
+                  ]
+                : [dataUrlToPart(currentImageDataUrl), { text: instruction }],
         },
         config: {
             responseModalities: [Modality.IMAGE, Modality.TEXT],

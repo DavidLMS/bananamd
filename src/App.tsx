@@ -24,7 +24,7 @@ export const App = () => {
     const generationTriggered = useRef(new Set<number>());
     const exportTriggered = useRef(false);
 
-    const [templates, setTemplates] = useState<{ context: string; description: string; naming: string; } | null>(null);
+    const [templates, setTemplates] = useState<{ context: string; description: string; naming: string; imageDescribe: string; } | null>(null);
     const [templateError, setTemplateError] = useState('');
 
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -63,17 +63,16 @@ export const App = () => {
     const allImagesSelected = React.useMemo(() => {
         if (!imageReferences.length) return false;
         return imageReferences.every(ref => {
+            const idx = ref.selectedIndex;
+            if (idx === undefined || idx === null) return false;
             if (ref.status === 'to-generate') {
-                const idx = ref.selectedIndex;
-                if (idx === undefined || idx === null) return false;
                 const hist = ref.histories?.[idx] || null;
                 const img = hist ? hist.nodes[hist.currentId].imageData : ref.generatedImages?.[idx] || null;
                 return !!img;
             } else {
-                const idx = ref.selectedIndex ?? 0;
                 if (idx === 0) {
                     const hist = ref.histories?.[0] || null;
-                    const img = hist ? hist.nodes[hist.currentId].imageData : ref.originalImage || null;
+                    const img = hist ? hist.nodes[hist.currentId].imageData : (ref.generatedImproved || null);
                     return !!img;
                 } else {
                     const hist = ref.histories?.[1] || null;
@@ -101,7 +100,7 @@ export const App = () => {
         } else {
             if (idx === 0) {
                 const hist = ref.histories?.[0] || null;
-                img = hist ? hist.nodes[hist.currentId].imageData : (ref.originalImage || null);
+                img = hist ? hist.nodes[hist.currentId].imageData : (ref.generatedImproved || null);
             } else {
                 const hist = ref.histories?.[1] || null;
                 img = hist ? hist.nodes[hist.currentId].imageData : (ref.generatedVariation || null);
@@ -153,16 +152,7 @@ export const App = () => {
         return { slug: rawSlug || 'image', alt: alt || ref.alt || 'Illustrative image' };
     };
 
-    const createAltAndSlug = async (ai: GoogleGenAI, ref: ImageReference, promptHint: string): Promise<{ slug: string; alt: string }> => {
-        const template = `You are a helpful assistant that creates web-friendly image filenames and accessible alt text.\n\nConstraints:\n- Filename slug: lowercase, letters a-z, numbers 0-9, hyphens only, 3-8 words, no extension.\n- Alt text: concise (<= 120 chars), describe essential content, no leading \"image of\" or \"photo of\".\n\nGiven:\nContext: """${ref.context}"""\nUser alt (may be empty): "${ref.alt || ''}"\nSelected prompt/description (may be empty): """${promptHint || ''}"""\n\nReturn ONLY:\n<filename_slug>...</filename_slug>\n<alt_text>...</alt_text>`;
-        const resp = await generateContentWithRetry(ai, { model: 'gemini-2.5-flash', contents: template });
-        const txt = typeof (resp as any).text === 'function' ? await (resp as any).text() : String((resp as any).text || '');
-        const slugMatch = txt.match(/<filename_slug>([\s\S]*?)<\/filename_slug>/);
-        const altMatch = txt.match(/<alt_text>([\s\S]*?)<\/alt_text>/);
-        const rawSlug = sanitizeSlug((slugMatch?.[1] || '').trim());
-        const alt = (altMatch?.[1] || '').trim();
-        return { slug: rawSlug || 'image', alt: alt || ref.alt || 'Illustrative image' };
-    };
+    
 
     const handleBuildExports = async () => {
         if (!markdownContent) return;
@@ -288,21 +278,23 @@ export const App = () => {
     useEffect(() => {
         const loadTemplates = async () => {
             try {
-                const [contextRes, descriptionRes, namingRes] = await Promise.all([
+                const [contextRes, descriptionRes, namingRes, imageDescribeRes] = await Promise.all([
                     fetch('./context_to_description.txt'),
                     fetch('./description_to_nano_prompt.txt'),
-                    fetch('./image_to_filename_description.txt')
+                    fetch('./image_to_filename_description.txt'),
+                    fetch('./image_to_description.txt')
                 ]);
 
-                if (!contextRes.ok || !descriptionRes.ok || !namingRes.ok) {
+                if (!contextRes.ok || !descriptionRes.ok || !namingRes.ok || !imageDescribeRes.ok) {
                     throw new Error('Failed to load prompt templates. Check network tab for details.');
                 }
 
                 const contextTemplate = await contextRes.text();
                 const descriptionTemplate = await descriptionRes.text();
                 const namingTemplate = await namingRes.text();
+                const imageDescribeTemplate = await imageDescribeRes.text();
                 
-                setTemplates({ context: contextTemplate, description: descriptionTemplate, naming: namingTemplate });
+                setTemplates({ context: contextTemplate, description: descriptionTemplate, naming: namingTemplate, imageDescribe: imageDescribeTemplate });
             } catch (error) {
                 console.error("Error loading templates:", error);
                 setTemplateError('Could not load required prompt templates. Please refresh the page.');
@@ -457,8 +449,7 @@ export const App = () => {
             }
 
             references.sort((a, b) => a.lineNumber - b.lineNumber);
-            const withDefaults = references.map(r => r.status === 'existing' ? { ...r, selectedIndex: r.selectedIndex ?? 0 } : r);
-            setImageReferences(withDefaults);
+            setImageReferences(references);
             if(references.length > 0) {
                 setCurrentReferenceIndex(0);
                 setView('generation');
@@ -497,23 +488,88 @@ export const App = () => {
             if (generationTriggered.current.has(index)) return;
             
             const ref = imageReferences[index];
-            if (!ref || ref.status !== 'to-generate' || ref.generatedImages || ref.generationError) return;
+            if (!ref) return;
 
             generationTriggered.current.add(index);
             
             try {
                 if (!templates || !markdownContent) throw new Error("Templates or markdown file not ready.");
-                
                 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
                 let styleImagePart: Part | undefined = styleReferenceImage;
                 if (!styleImagePart && styleImageFile) {
-                     try {
-                        styleImagePart = await fileToGenerativePart(styleImageFile);
-                    } catch (e) {
-                        console.error("Could not process style image:", e);
-                    }
+                    try { styleImagePart = await fileToGenerativePart(styleImageFile); } catch (e) { console.error("Could not process style image:", e); }
                 }
 
+                // Branch: existing image → left: improve; right: new-from-description
+                if (ref.status === 'existing') {
+                    setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingImproved: true, improvedError: '', isGeneratingVariation: true, variationError: '' } : r));
+
+                    const improveInstruction = 'Improve this image: enhance clarity, lighting, dynamic range, and detail; preserve composition and subject.';
+                    const improvedRaw = await generateEditedImage(ai, `${ref.lineNumber}-improve`, ref.originalImage!, improveInstruction, styleImagePart).catch(e => {
+                        console.error('Improve failed:', e);
+                        return null;
+                    });
+
+                    const normalizeImage = (img: string | null): string | null => {
+                        if (!img || typeof img !== 'string') return null;
+                        const looksLikeDataUrl = /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(img);
+                        if (!looksLikeDataUrl) return null;
+                        if (img.length < 200) return null;
+                        return img;
+                    };
+                    const improved = normalizeImage(improvedRaw);
+
+                    // Right image: new-from-description
+                    let describeText = '';
+                    try {
+                        const imagePart = (() => {
+                            const { mimeType, base64 } = parseDataUrl(ref.originalImage!);
+                            return { inlineData: { mimeType, data: base64 } } as any;
+                        })();
+                        const describePrompt = templates.imageDescribe
+                            .replace('{context}', ref.context || '')
+                            .replace('{user_alt}', ref.alt || '');
+                        const describeResp = await generateContentWithRetry(ai, { model: 'gemini-2.5-flash', contents: { parts: [imagePart, { text: describePrompt }] } });
+                        const textOut = typeof (describeResp as any).text === 'function' ? await (describeResp as any).text() : String((describeResp as any).text || '');
+                        describeText = textOut.trim();
+                    } catch (e) {
+                        console.error('Describe image failed:', e);
+                    }
+
+                    let newPrompt = '';
+                    try {
+                        const tpl = templates.description.replace('{alt_text}', describeText || ref.alt || '');
+                        const resp = await generateContentWithRetry(ai, { model: 'gemini-2.5-flash', contents: tpl });
+                        const txt = typeof (resp as any).text === 'function' ? await (resp as any).text() : String((resp as any).text || '');
+                        const prompt1Match = txt.match(/<prompt_1>([\s\S]*?)<\/prompt_1>/);
+                        newPrompt = (prompt1Match?.[1] || '').trim();
+                    } catch (e) {
+                        console.error('Prompt from description failed:', e);
+                    }
+
+                    const rightRaw = newPrompt ? await generateImageFromPrompt(ai, newPrompt, styleImagePart).catch(e => { console.error('New image generation failed:', e); return null; }) : null;
+                    const right = normalizeImage(rightRaw);
+
+                    setImageReferences(prev => prev.map((r, i) => {
+                        if (i !== index) return r;
+                        // Init histories
+                        const histories: [ImageHistory | null, ImageHistory | null] = [null, null];
+                        if (improved) {
+                            const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                            const node: ImageVersionNode = { id, imageData: improved, parentId: null, childrenIds: [], createdAt: Date.now() };
+                            histories[0] = { nodes: { [id]: node }, rootId: id, currentId: id, order: [id] };
+                        }
+                        if (right) {
+                            const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                            const node: ImageVersionNode = { id, imageData: right, parentId: null, childrenIds: [], createdAt: Date.now() };
+                            histories[1] = { nodes: { [id]: node }, rootId: id, currentId: id, order: [id] };
+                        }
+                        return { ...r, isGeneratingImproved: false, isGeneratingVariation: false, generatedImproved: improved || null, generatedVariation: right || null, histories };
+                    }));
+                    return;
+                }
+
+                // Default branch: to-generate → generate 2 proposals
                 // Step 1: Generate Prompts
                 setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingPrompts: true, generationError: '' } : r));
 
@@ -603,7 +659,15 @@ export const App = () => {
     
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const variationRaw = await generateImageVariation(ai, refToUpdate.originalImage, refToUpdate.alt);
+            let styleImagePart: Part | undefined = styleReferenceImage;
+            if (!styleImagePart && styleImageFile) {
+                try {
+                    styleImagePart = await fileToGenerativePart(styleImageFile);
+                } catch (e) {
+                    console.error("Could not process style image:", e);
+                }
+            }
+            const variationRaw = await generateImageVariation(ai, refToUpdate.originalImage, refToUpdate.alt, styleImagePart);
             const normalizeImage = (img: string | null): string | null => {
                 if (!img || typeof img !== 'string') return null;
                 const looksLikeDataUrl = /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(img);
@@ -692,8 +756,8 @@ export const App = () => {
 
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            let styleImagePart: Part | undefined;
-            if (styleImageFile) {
+            let styleImagePart: Part | undefined = styleReferenceImage;
+            if (!styleImagePart && styleImageFile) {
                 try {
                     styleImagePart = await fileToGenerativePart(styleImageFile);
                 } catch (e) {
@@ -739,7 +803,7 @@ export const App = () => {
             };
             // Determine base images depending on status
             const base0 = updated[currentReferenceIndex].status === 'existing'
-                ? updated[currentReferenceIndex].originalImage || null
+                ? (updated[currentReferenceIndex].generatedImproved || updated[currentReferenceIndex].originalImage || null)
                 : (updated[currentReferenceIndex].generatedImages?.[0] || null);
             const base1 = updated[currentReferenceIndex].status === 'existing'
                 ? (updated[currentReferenceIndex].generatedVariation || null)
@@ -760,7 +824,15 @@ export const App = () => {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const currentNode = history.nodes[history.currentId];
             const branchKey = `${ref.lineNumber}-${imageIndex}-${currentNode.id}`;
-            const editedImageRaw = await generateEditedImage(ai, branchKey, currentNode.imageData, instruction);
+            let styleImagePart: Part | undefined = styleReferenceImage;
+            if (!styleImagePart && styleImageFile) {
+                try {
+                    styleImagePart = await fileToGenerativePart(styleImageFile);
+                } catch (e) {
+                    console.error("Could not process style image:", e);
+                }
+            }
+            const editedImageRaw = await generateEditedImage(ai, branchKey, currentNode.imageData, instruction, styleImagePart);
             const normalizeImage = (img: string | null): string | null => {
                 if (!img || typeof img !== 'string') return null;
                 const looksLikeDataUrl = /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(img);
