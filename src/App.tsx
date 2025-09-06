@@ -22,6 +22,7 @@ export const App = () => {
     const [mdBaseName, setMdBaseName] = useState<string>('document.md');
     const [currentReferenceIndex, setCurrentReferenceIndex] = useState<number | null>(null);
     const generationTriggered = useRef(new Set<number>());
+    const exportTriggered = useRef(false);
 
     const [templates, setTemplates] = useState<{ context: string; description: string; naming: string; } | null>(null);
     const [templateError, setTemplateError] = useState('');
@@ -82,6 +83,14 @@ export const App = () => {
             }
         });
     }, [imageReferences]);
+
+    // Auto-trigger export when all images have been selected
+    useEffect(() => {
+        if (allImagesSelected && !exportTriggered.current && !exporting && !zipUrl) {
+            exportTriggered.current = true;
+            handleBuildExports();
+        }
+    }, [allImagesSelected, exporting, zipUrl]);
 
     const getSelectedImageData = (ref: ImageReference): { img: string; idx: number; promptHint: string } => {
         const idx = ref.status === 'to-generate' ? (ref.selectedIndex as number) : (ref.selectedIndex ?? 0);
@@ -474,6 +483,13 @@ export const App = () => {
         setCurrentReferenceIndex(null);
         setMarkdownError('');
         generationTriggered.current.clear();
+        // reset export
+        setExporting(false);
+        setExportError('');
+        setExportPreview('');
+        setZipUrl(null);
+        setZipAllUrl(null);
+        exportTriggered.current = false;
     };
     
     useEffect(() => {
@@ -905,7 +921,7 @@ export const App = () => {
                 </>
             )}
 
-            {view === 'generation' && currentReferenceIndex !== null && imageReferences.length > 0 && (
+            {view === 'generation' && !allImagesSelected && currentReferenceIndex !== null && imageReferences.length > 0 && (
                 <section className="results-section">
                     <div className="results-navigation">
                         <button className="nav-button" onClick={handleStartOver}>Start Over</button>
@@ -944,17 +960,17 @@ export const App = () => {
             )}
             {view === 'generation' && allImagesSelected && (
                 <section className="results-section" style={{ marginTop: '1rem' }}>
-                    <div className="results-navigation">
-                        <span>All images selected — ready to export</span>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                            <button className="nav-button" onClick={handleBuildExports} disabled={exporting}>
-                                {exporting ? 'Building…' : 'Generate Download(s)'}
-                            </button>
-                            {zipUrl && (
-                                <a className="nav-button" href={zipUrl} download={`bananamd-package.zip`}>Download ZIP</a>
-                            )}
-                            {zipAllUrl && (
-                                <a className="nav-button" href={zipAllUrl} download={`bananamd-all-images.zip`}>Download All Images</a>
+                    <div className="results-navigation" style={{ justifyContent: 'space-between' }}>
+                        <button className="nav-button" onClick={handleStartOver}>Start Over</button>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            {exporting && (<span>Building…</span>)}
+                            {!exporting && zipUrl && (
+                                <>
+                                    <a className="nav-button" href={zipUrl} download={`bananamd-package.zip`}>Download ZIP</a>
+                                    {zipAllUrl && (
+                                        <a className="nav-button" href={zipAllUrl} download={`bananamd-all-images.zip`}>Download All Images</a>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>
