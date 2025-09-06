@@ -309,25 +309,6 @@ export const App = () => {
         }
     }, [currentReferenceIndex, imageReferences, templates, markdownContent, styleImageFile]);
 
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (view !== 'generation' || currentReferenceIndex === null) return;
-
-            if (event.key === 'ArrowLeft') {
-                handleImageSelect(0);
-            }
-            if (event.key === 'ArrowRight') {
-                handleImageSelect(1);
-            }
-        };
-
-        document.addEventListener('keydown', handleKeyDown);
-
-        return () => {
-            document.removeEventListener('keydown', handleKeyDown);
-        };
-    }, [view, currentReferenceIndex, handleImageSelect]);
-
     const handleGenerateVariation = async (refToUpdate: ImageReference) => {
         if (!refToUpdate.originalImage) return;
     
@@ -343,6 +324,12 @@ export const App = () => {
             setImageReferences(prev => prev.map(r => r.lineNumber === refToUpdate.lineNumber ? { ...r, isGeneratingVariation: false, variationError: errorMessage } : r));
         }
     };
+
+    const handleNext = useCallback(() => {
+        if (currentReferenceIndex !== null) {
+            setCurrentReferenceIndex(Math.min(imageReferences.length - 1, currentReferenceIndex + 1));
+        }
+    }, [currentReferenceIndex, imageReferences.length]);
 
     const handleImageSelect = useCallback((imageIndex: number) => {
         if (currentReferenceIndex === null) return;
@@ -397,11 +384,24 @@ export const App = () => {
         }
     };
     
-    const handleNext = useCallback(() => {
-        if (currentReferenceIndex !== null) {
-            setCurrentReferenceIndex(Math.min(imageReferences.length - 1, currentReferenceIndex + 1));
-        }
-    }, [currentReferenceIndex, imageReferences.length]);
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (view !== 'generation' || currentReferenceIndex === null) return;
+
+            if (event.key === 'ArrowLeft') {
+                handleImageSelect(0);
+            }
+            if (event.key === 'ArrowRight') {
+                handleImageSelect(1);
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [view, currentReferenceIndex, handleImageSelect]);
 
     return (
         <div className="app-container">
