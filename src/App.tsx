@@ -13,6 +13,7 @@ export const App = () => {
     const [markdownFile, setMarkdownFile] = useState<File | null>(null);
     const [markdownContent, setMarkdownContent] = useState<string | null>(null);
     const [styleImageFile, setStyleImageFile] = useState<File | null>(null);
+    const [styleReferenceImage, setStyleReferenceImage] = useState<Part | undefined>(undefined);
     const [maintainStyle, setMaintainStyle] = useState(false);
     const [isParsing, setIsParsing] = useState(false);
     const [markdownError, setMarkdownError] = useState('');
@@ -257,8 +258,8 @@ export const App = () => {
                 if (!templates || !markdownContent) throw new Error("Templates or markdown file not ready.");
                 
                 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                let styleImagePart: Part | undefined;
-                if (styleImageFile) {
+                let styleImagePart: Part | undefined = styleReferenceImage;
+                if (!styleImagePart && styleImageFile) {
                      try {
                         styleImagePart = await fileToGenerativePart(styleImageFile);
                     } catch (e) {
@@ -334,6 +335,15 @@ export const App = () => {
     const handleImageSelect = useCallback((imageIndex: number) => {
         if (currentReferenceIndex === null) return;
 
+        if (maintainStyle && currentReferenceIndex === 0 && !styleReferenceImage) {
+            const selectedImage = imageReferences[currentReferenceIndex].generatedImages?.[imageIndex];
+            if (selectedImage) {
+                const mimeType = selectedImage.substring(selectedImage.indexOf(":") + 1, selectedImage.indexOf(";"));
+                const data = selectedImage.split(',')[1];
+                setStyleReferenceImage({ inlineData: { mimeType, data } });
+            }
+        }
+
         const updatedReferences = [...imageReferences];
         updatedReferences[currentReferenceIndex].selectedIndex = imageIndex;
         setImageReferences(updatedReferences);
@@ -341,7 +351,7 @@ export const App = () => {
         setTimeout(() => {
             handleNext();
         }, 300); // Small delay to show selection before advancing
-    }, [currentReferenceIndex, imageReferences, handleNext]);
+    }, [currentReferenceIndex, imageReferences, handleNext, maintainStyle, styleReferenceImage]);
 
     const handleRegenerateImage = async (imageIndex: number) => {
         if (currentReferenceIndex === null) return;
@@ -446,6 +456,7 @@ export const App = () => {
                                     label="Upload a style reference image (optional)."
                                     dragLabel="Drop style image here"
                                     error={''}
+                                    disabled={maintainStyle && styleReferenceImage}
                                 />
                             </div>
                             <div className="options">
@@ -454,7 +465,7 @@ export const App = () => {
                                         type="checkbox"
                                         checked={maintainStyle}
                                         onChange={(e) => setMaintainStyle(e.target.checked)}
-                                        disabled // This option is for variations, maybe it should be inside the item? For now, let's keep it simple.
+                                        disabled={currentReferenceIndex !== null && currentReferenceIndex > 0}
                                     />
                                     <span className="checkbox-custom">
                                         <CheckIcon />

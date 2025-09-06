@@ -37,6 +37,16 @@
   border-color: var(--error-red);
 }
 
+.drop-zone.disabled {
+    background-color: var(--disabled-bg);
+    cursor: not-allowed;
+    border-color: var(--border-color);
+}
+
+.drop-zone.disabled:hover {
+    border-color: var(--border-color);
+}
+
 .drop-zone input[type="file"] {
   display: none;
 }

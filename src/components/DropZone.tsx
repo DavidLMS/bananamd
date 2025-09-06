@@ -9,30 +9,35 @@ interface DropZoneProps {
     label: string;
     dragLabel: string;
     error: string;
+    disabled?: boolean;
 }
 
-export const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLabel, error }: DropZoneProps) => {
+export const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLabel, error, disabled }: DropZoneProps) => {
     const [isDragging, setIsDragging] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
     const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+        if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(true);
     };
 
     const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+        if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
     };
 
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+        if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
     };
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
@@ -43,6 +48,7 @@ export const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLab
     };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (disabled) return;
         const files = e.target.files;
         if (files && files.length > 0) {
             onFileSelect(files[0]);
@@ -50,12 +56,13 @@ export const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLab
     };
 
     const handleClick = () => {
+        if (disabled) return;
         inputRef.current?.click();
     }
 
     return (
         <div
-            className={`drop-zone ${isDragging ? 'drag-over' : ''} ${error ? 'has-error' : ''}`}
+            className={`drop-zone ${isDragging ? 'drag-over' : ''} ${error ? 'has-error' : ''} ${disabled ? 'disabled' : ''}`}}
             onDragEnter={handleDragEnter}
             onDragLeave={handleDragLeave}
             onDragOver={handleDragOver}
