@@ -25,9 +25,10 @@ interface ImageReferenceItemProps {
     onGenerateVariation: (ref: ImageReference) => void;
     onSelect: (index: number) => void;
     onOpenPrompt: (prompt: string) => void;
+    onRegenerate: (imageIndex: number) => void;
 }
 
-export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariation, onSelect, onOpenPrompt }: ImageReferenceItemProps) => {
+export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariation, onSelect, onOpenPrompt, onRegenerate }: ImageReferenceItemProps) => {
     const { 
         path, alt, lineNumber, status, context,
         isGeneratingPrompts, proposedPrompts,
@@ -110,13 +111,23 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                             <img src={generatedImages[0]} alt="Generated image option 1" className="generated-image" />
                                             <button className="info-button" onClick={(e) => { e.stopPropagation(); onOpenPrompt(reference.proposedPrompts![0]); }}>i</button>
                                         </div>
-                                    ) : <div className="generated-image-wrapper placeholder">Image 1 failed</div>}
+                                    ) : (
+                                        <div className="generated-image-wrapper placeholder">
+                                            Image 1 failed
+                                            <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(0); }}>Try again</button>
+                                        </div>
+                                    )}
                                     {generatedImages[1] && reference.proposedPrompts?.[1] ? (
                                         <div className={`generated-image-wrapper ${reference.selectedIndex === 1 ? 'selected' : ''}`} onClick={() => onSelect(1)}>
                                             <img src={generatedImages[1]} alt="Generated image option 2" className="generated-image" />
                                             <button className="info-button" onClick={(e) => { e.stopPropagation(); onOpenPrompt(reference.proposedPrompts![1]); }}>i</button>
                                         </div>
-                                    ) : <div className="generated-image-wrapper placeholder">Image 2 failed</div>}
+                                    ) : (
+                                        <div className="generated-image-wrapper placeholder">
+                                            Image 2 failed
+                                            <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(1); }}>Try again</button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}

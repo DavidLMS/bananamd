@@ -265,6 +265,18 @@
     border-color: var(--banana-yellow);
 }
 
+.retry-button {
+    margin-left: 1rem;
+    background-color: var(--banana-yellow);
+    border: none;
+    color: var(--dark-text);
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
 .generated-image-wrapper.selected {
     border-color: var(--banana-yellow);
     box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);

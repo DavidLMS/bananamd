@@ -309,6 +309,25 @@ export const App = () => {
         }
     }, [currentReferenceIndex, imageReferences, templates, markdownContent, styleImageFile]);
 
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (view !== 'generation' || currentReferenceIndex === null) return;
+
+            if (event.key === 'ArrowLeft') {
+                handleImageSelect(0);
+            }
+            if (event.key === 'ArrowRight') {
+                handleImageSelect(1);
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [view, currentReferenceIndex, handleImageSelect]);
+
     const handleGenerateVariation = async (refToUpdate: ImageReference) => {
         if (!refToUpdate.originalImage) return;
     
@@ -325,7 +344,7 @@ export const App = () => {
         }
     };
 
-    const handleImageSelect = (imageIndex: number) => {
+    const handleImageSelect = useCallback((imageIndex: number) => {
         if (currentReferenceIndex === null) return;
 
         const updatedReferences = [...imageReferences];
@@ -335,6 +354,41 @@ export const App = () => {
         setTimeout(() => {
             handleNext();
         }, 300); // Small delay to show selection before advancing
+    }, [currentReferenceIndex, imageReferences, handleNext]);
+
+    const handleRegenerateImage = async (imageIndex: number) => {
+        if (currentReferenceIndex === null) return;
+
+        const reference = imageReferences[currentReferenceIndex];
+        const prompt = reference.proposedPrompts?.[imageIndex];
+
+        if (!prompt) {
+            console.error("Could not find prompt for regeneration.");
+            return;
+        }
+
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            let styleImagePart: Part | undefined;
+            if (styleImageFile) {
+                try {
+                    styleImagePart = await fileToGenerativePart(styleImageFile);
+                } catch (e) {
+                    console.error("Could not process style image:", e);
+                }
+            }
+
+            const newImage = await generateImageFromPrompt(ai, prompt, styleImagePart);
+
+            const updatedReferences = [...imageReferences];
+            if (updatedReferences[currentReferenceIndex].generatedImages) {
+                updatedReferences[currentReferenceIndex].generatedImages![imageIndex] = newImage;
+                setImageReferences(updatedReferences);
+            }
+
+        } catch (error) {
+            console.error(`Failed to regenerate image for L${reference.lineNumber}:`, error);
+        }
     };
 
     const handlePrevious = () => {
@@ -343,11 +397,11 @@ export const App = () => {
         }
     };
     
-    const handleNext = () => {
+    const handleNext = useCallback(() => {
         if (currentReferenceIndex !== null) {
             setCurrentReferenceIndex(Math.min(imageReferences.length - 1, currentReferenceIndex + 1));
         }
-    };
+    }, [currentReferenceIndex, imageReferences.length]);
 
     return (
         <div className="app-container">
@@ -454,6 +508,7 @@ export const App = () => {
                             onGenerateVariation={handleGenerateVariation}
                             onSelect={handleImageSelect}
                             onOpenPrompt={openPromptModal}
+                            onRegenerate={handleRegenerateImage}
                         />
                     </div>
                 </section>
