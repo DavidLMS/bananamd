@@ -101,6 +101,14 @@ const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLabel, err
     );
 };
 
+interface ImageReference {
+    lineNumber: number;
+    alt: string;
+    path: string;
+    context: string;
+    status: 'existing' | 'to-generate';
+}
+
 const App = () => {
     const [markdownFile, setMarkdownFile] = useState<File | null>(null);
     const [styleImageFile, setStyleImageFile] = useState<File | null>(null);
@@ -108,10 +116,12 @@ const App = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [markdownError, setMarkdownError] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [imageReferences, setImageReferences] = useState<ImageReference[]>([]);
 
     const handleMarkdownSelect = async (file: File) => {
         setMarkdownFile(null); // Reset on new selection
         setMarkdownError('');
+        setImageReferences([]);
 
         if (file.name.endsWith('.md')) {
             setMarkdownFile(file);
@@ -139,20 +149,129 @@ const App = () => {
         setMarkdownError('Invalid file type. Please upload a .md or .zip file.');
     };
 
-    const handlePropose = () => {
+    const handlePropose = async () => {
         if (!markdownFile) return;
         setIsLoading(true);
-        // AI generation logic will go here in the future
-        console.log({
-            markdownFile,
-            styleImageFile,
-            maintainStyle,
-        });
-        // Simulate processing delay
-        setTimeout(() => {
+        setMarkdownError('');
+        setImageReferences([]);
+
+        let markdownContent = '';
+        let zipFilePaths: string[] = [];
+        const isZip = markdownFile.name.endsWith('.zip');
+
+        try {
+            if (isZip) {
+                const zip = await JSZip.loadAsync(markdownFile);
+                zipFilePaths = Object.keys(zip.files).filter(name => !zip.files[name].dir);
+                const mdFileEntry = Object.values(zip.files).find(
+                    file => !file.dir && file.name.endsWith('.md')
+                );
+
+                if (mdFileEntry) {
+                    markdownContent = await mdFileEntry.async('string');
+                } else {
+                    setMarkdownError('No .md file found in the .zip archive.');
+                    setIsLoading(false);
+                    return;
+                }
+            } else {
+                markdownContent = await markdownFile.text();
+            }
+
+            const references: ImageReference[] = [];
+            
+            // 1. Find Markdown image references: ![]()
+            const markdownRegex = /!\[([^\]]*)\]\((.*?)\)/g; // Use non-greedy regex for path
+            let match;
+
+            while ((match = markdownRegex.exec(markdownContent)) !== null) {
+                const [fullMatch, rawAlt, rawPath] = match;
+
+                // Split path from optional title. Title must be in quotes.
+                const pathParts = rawPath.split(/\s+(?=["'])/, 2);
+                let path = pathParts[0].trim();
+                if (path.startsWith('<') && path.endsWith('>')) {
+                    path = path.slice(1, -1);
+                }
+                
+                // Unescape characters like \), \(, \\ etc.
+                path = path.replace(/\\(.)/g, '$1');
+                const alt = rawAlt.replace(/\\(.)/g, '$1');
+
+                const matchIndex = match.index;
+
+                const contentBeforeMatch = markdownContent.substring(0, matchIndex);
+                const lineNumber = (contentBeforeMatch.match(/\n/g) || []).length + 1;
+
+                const contextStart = Math.max(0, matchIndex - 500);
+                const contextEnd = Math.min(markdownContent.length, matchIndex + fullMatch.length + 500);
+                const context = markdownContent.substring(contextStart, contextEnd);
+
+                let status: ImageReference['status'] = 'to-generate';
+                if (isZip) {
+                    const normalizedPath = path.startsWith('./') ? path.substring(2) : path;
+                    const exists = zipFilePaths.some(p => p.endsWith(normalizedPath));
+                    if (exists) {
+                        status = 'existing';
+                    }
+                }
+
+                references.push({ lineNumber, alt, path, context, status });
+            }
+
+            // 2. Find HTML <img> tag references
+            const htmlImgRegex = /<img([^>]+)>/gi;
+
+            while ((match = htmlImgRegex.exec(markdownContent)) !== null) {
+                const [fullMatch, attrsString] = match;
+                if (!attrsString) continue;
+
+                const srcMatch = attrsString.match(/src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+                const altMatch = attrsString.match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))/i);
+
+                const path = srcMatch ? srcMatch[1] || srcMatch[2] || srcMatch[3] : null;
+
+                // An img tag must have a src to be valid
+                if (path) {
+                    const alt = altMatch ? altMatch[1] || altMatch[2] || altMatch[3] || '' : '';
+                    
+                    const matchIndex = match.index;
+
+                    const contentBeforeMatch = markdownContent.substring(0, matchIndex);
+                    const lineNumber = (contentBeforeMatch.match(/\n/g) || []).length + 1;
+
+                    const contextStart = Math.max(0, matchIndex - 500);
+                    const contextEnd = Math.min(markdownContent.length, matchIndex + fullMatch.length + 500);
+                    const context = markdownContent.substring(contextStart, contextEnd);
+
+                    let status: ImageReference['status'] = 'to-generate';
+                     if (isZip) {
+                        const normalizedPath = path.startsWith('./') ? path.substring(2) : path;
+                        const exists = zipFilePaths.some(p => p.endsWith(normalizedPath));
+                        if (exists) {
+                            status = 'existing';
+                        }
+                    }
+
+                    references.push({ lineNumber, alt, path, context, status });
+                }
+            }
+
+            // 3. Sort all found references by line number
+            references.sort((a, b) => a.lineNumber - b.lineNumber);
+
+            setImageReferences(references);
+
+        } catch (error) {
+            console.error("Error processing file:", error);
+            setMarkdownError('Failed to parse the uploaded file.');
+        } finally {
             setIsLoading(false);
-        }, 3000);
+        }
     };
+    
+    const existingImagesCount = imageReferences.filter(ref => ref.status === 'existing').length;
+    const toGenerateImagesCount = imageReferences.filter(ref => ref.status === 'to-generate').length;
 
     return (
         <main className="app-container">
@@ -211,6 +330,26 @@ const App = () => {
             <div className="propose-section">
                 {isLoading ? (
                     <Spinner />
+                ) : imageReferences.length > 0 ? (
+                    <div className="generation-step">
+                        {existingImagesCount > 0 && (
+                            <p className="progress-indicator">
+                                Found {existingImagesCount} existing image{existingImagesCount !== 1 ? 's' : ''}.
+                            </p>
+                        )}
+                         {toGenerateImagesCount > 0 && (
+                            <p className="progress-indicator">
+                                Found {toGenerateImagesCount} image placeholder{toGenerateImagesCount !== 1 ? 's' : ''} to illustrate.
+                            </p>
+                        )}
+                        <button 
+                            className="propose-button"
+                            disabled={toGenerateImagesCount === 0}
+                            aria-disabled={toGenerateImagesCount === 0}
+                        >
+                            Generate {toGenerateImagesCount > 0 ? `${toGenerateImagesCount} ` : ''}Image{toGenerateImagesCount !== 1 ? 's' : ''}
+                        </button>
+                    </div>
                 ) : (
                     <button
                         className="propose-button"
