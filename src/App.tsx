@@ -5,8 +5,8 @@ import { CheckIcon, ChevronIcon } from './components/icons';
 import { Spinner } from './components/spinners';
 import { Modal } from './components/Modal';
 import { DropZone } from './components/DropZone';
-import { ImageReferenceItem, type ImageReference } from './components/ImageReferenceItem';
-import { fileToGenerativePart, generateContentWithRetry, generateImageFromPrompt, generateImageVariation } from './services/genai';
+import { ImageReferenceItem, type ImageReference, type ImageHistory, type ImageVersionNode } from './components/ImageReferenceItem';
+import { fileToGenerativePart, generateContentWithRetry, generateImageFromPrompt, generateImageVariation, generateEditedImage } from './services/genai';
 
 export const App = () => {
     const [view, setView] = useState<'upload' | 'generation'>('upload');
@@ -277,7 +277,10 @@ export const App = () => {
                         : template.replace('{file_content}', markdownContent).replace('{context}', currentRef.context);
                     
                     const response = await generateContentWithRetry(ai, { model: "gemini-2.5-flash", contents: prompt });
-                    const responseText = response.text.trim();
+                    const textOut = typeof (response as any).text === 'function'
+                        ? await (response as any).text()
+                        : String((response as any).text || '');
+                    const responseText = textOut.trim();
                     const prompt1Match = responseText.match(/<prompt_1>([\s\S]*?)<\/prompt_1>/);
                     const prompt2Match = responseText.match(/<prompt_2>([\s\S]*?)<\/prompt_2>/);
                     if (!prompt1Match || !prompt2Match) throw new Error("Could not parse prompts from the AI response.");
@@ -295,9 +298,45 @@ export const App = () => {
                         return null;
                     })
                 );
-                const [image1, image2] = await Promise.all(imagePromises);
+                const [rawImage1, rawImage2] = await Promise.all(imagePromises);
 
-                setImageReferences(prev => prev.map((r, i) => i === index ? { ...r, isGeneratingImages: false, generatedImages: [image1, image2] } : r));
+                const normalizeImage = (img: string | null): string | null => {
+                    if (!img || typeof img !== 'string') return null;
+                    const looksLikeDataUrl = /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(img);
+                    if (!looksLikeDataUrl) return null;
+                    // Basic size sanity check to avoid empty payloads that render invisibly
+                    if (img.length < 200) return null;
+                    return img;
+                };
+                const image1 = normalizeImage(rawImage1);
+                const image2 = normalizeImage(rawImage2);
+
+                const createInitialHistory = (img: string | null | undefined): ImageHistory | null => {
+                    if (!img) return null;
+                    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                    const node: ImageVersionNode = {
+                        id,
+                        imageData: img,
+                        parentId: null,
+                        childrenIds: [],
+                        createdAt: Date.now(),
+                    };
+                    return {
+                        nodes: { [id]: node },
+                        rootId: id,
+                        currentId: id,
+                        order: [id],
+                    };
+                };
+
+                setImageReferences(prev => prev.map((r, i) => {
+                    if (i !== index) return r;
+                    const histories: [ImageHistory | null, ImageHistory | null] = [
+                        createInitialHistory(image1),
+                        createInitialHistory(image2)
+                    ];
+                    return { ...r, isGeneratingImages: false, generatedImages: [image1, image2], histories };
+                }));
             } catch (error) {
                 console.error(`Failed to process image for L${ref.lineNumber} (path: ${ref.path}):`, error);
                 const errorMessage = error instanceof Error ? error.message : "An unknown error occurred during generation.";
@@ -317,8 +356,26 @@ export const App = () => {
     
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const variation = await generateImageVariation(ai, refToUpdate.originalImage, refToUpdate.alt);
-            setImageReferences(prev => prev.map(r => r.lineNumber === refToUpdate.lineNumber ? { ...r, isGeneratingVariation: false, generatedVariation: variation } : r));
+            const variationRaw = await generateImageVariation(ai, refToUpdate.originalImage, refToUpdate.alt);
+            const normalizeImage = (img: string | null): string | null => {
+                if (!img || typeof img !== 'string') return null;
+                const looksLikeDataUrl = /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(img);
+                if (!looksLikeDataUrl) return null;
+                if (img.length < 200) return null;
+                return img;
+            };
+            const variation = normalizeImage(variationRaw);
+            setImageReferences(prev => prev.map(r => {
+                if (r.lineNumber !== refToUpdate.lineNumber) return r;
+                // Initialize history for variation slot (index 1)
+                const histories = r.histories ? [...r.histories] as [ImageHistory | null, ImageHistory | null] : [null, null];
+                if (!histories[1] && variation) {
+                    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                    const node: ImageVersionNode = { id, imageData: variation, parentId: null, childrenIds: [], createdAt: Date.now() };
+                    histories[1] = { nodes: { [id]: node }, rootId: id, currentId: id, order: [id] };
+                }
+                return { ...r, isGeneratingVariation: false, generatedVariation: variation, histories };
+            }));
         } catch (error) {
             console.error(`Failed to generate variation for L${refToUpdate.lineNumber}:`, error);
             const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
@@ -381,7 +438,15 @@ export const App = () => {
                 }
             }
 
-            const newImage = await generateImageFromPrompt(ai, prompt, styleImagePart);
+            const newImageRaw = await generateImageFromPrompt(ai, prompt, styleImagePart);
+            const normalizeImage = (img: string | null): string | null => {
+                if (!img || typeof img !== 'string') return null;
+                const looksLikeDataUrl = /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(img);
+                if (!looksLikeDataUrl) return null;
+                if (img.length < 200) return null;
+                return img;
+            };
+            const newImage = normalizeImage(newImageRaw);
 
             if (updatedReferences[currentReferenceIndex].generatedImages) {
                 updatedReferences[currentReferenceIndex].generatedImages![imageIndex] = newImage;
@@ -393,6 +458,95 @@ export const App = () => {
             updatedReferences[currentReferenceIndex].isRetrying = false;
             setImageReferences(updatedReferences);
         }
+    };
+
+    const handleEditInstruction = async (imageIndex: 0 | 1, instruction: string) => {
+        if (currentReferenceIndex === null) return;
+        const ref = imageReferences[currentReferenceIndex];
+        if (!ref) return;
+
+        const updated = [...imageReferences];
+        // Ensure history exists for the chosen image index
+        if (!updated[currentReferenceIndex].histories) {
+            const initHistory = (img: string | null | undefined): ImageHistory | null => {
+                if (!img) return null;
+                const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                const node: ImageVersionNode = { id, imageData: img, parentId: null, childrenIds: [], createdAt: Date.now() };
+                return { nodes: { [id]: node }, rootId: id, currentId: id, order: [id] };
+            };
+            // Determine base images depending on status
+            const base0 = updated[currentReferenceIndex].status === 'existing'
+                ? updated[currentReferenceIndex].originalImage || null
+                : (updated[currentReferenceIndex].generatedImages?.[0] || null);
+            const base1 = updated[currentReferenceIndex].status === 'existing'
+                ? (updated[currentReferenceIndex].generatedVariation || null)
+                : (updated[currentReferenceIndex].generatedImages?.[1] || null);
+            updated[currentReferenceIndex].histories = [initHistory(base0), initHistory(base1)];
+        }
+
+        const histories = updated[currentReferenceIndex].histories!;
+        const history = histories[imageIndex];
+        if (!history) return;
+
+        // Mark editing
+        history.isEditing = true;
+        history.error = '';
+        setImageReferences(updated);
+
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const currentNode = history.nodes[history.currentId];
+            const branchKey = `${ref.lineNumber}-${imageIndex}-${currentNode.id}`;
+            const editedImageRaw = await generateEditedImage(ai, branchKey, currentNode.imageData, instruction);
+            const normalizeImage = (img: string | null): string | null => {
+                if (!img || typeof img !== 'string') return null;
+                const looksLikeDataUrl = /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(img);
+                if (!looksLikeDataUrl) return null;
+                if (img.length < 200) return null;
+                return img;
+            };
+            const editedImage = normalizeImage(editedImageRaw) || currentNode.imageData;
+
+            // Create new node
+            const newId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const newNode: ImageVersionNode = {
+                id: newId,
+                imageData: editedImage,
+                parentId: currentNode.id,
+                childrenIds: [],
+                createdAt: Date.now(),
+                instruction,
+            };
+            // Link to parent
+            currentNode.childrenIds.push(newId);
+            history.nodes[newId] = newNode;
+            history.order.push(newId);
+            history.currentId = newId;
+        } catch (e: any) {
+            console.error('Edit failed:', e);
+            history.error = e?.message || 'Edit failed';
+        } finally {
+            history.isEditing = false;
+            setImageReferences([...updated]);
+        }
+    };
+
+    const handleNavigateHistory = (imageIndex: 0 | 1, direction: 'prev' | 'next') => {
+        if (currentReferenceIndex === null) return;
+        const updated = [...imageReferences];
+        const histories = updated[currentReferenceIndex].histories;
+        if (!histories) return;
+        const history = histories[imageIndex];
+        if (!history) return;
+        const idx = history.order.indexOf(history.currentId);
+        if (idx < 0) return;
+        if (direction === 'prev' && idx > 0) {
+            history.currentId = history.order[idx - 1];
+        }
+        if (direction === 'next' && idx < history.order.length - 1) {
+            history.currentId = history.order[idx + 1];
+        }
+        setImageReferences(updated);
     };
 
     const handlePrevious = () => {
@@ -527,6 +681,16 @@ export const App = () => {
                             onSelect={handleImageSelect}
                             onOpenPrompt={openPromptModal}
                             onRegenerate={handleRegenerateImage}
+                            onEditInstruction={handleEditInstruction}
+                            onNavigateHistory={handleNavigateHistory}
+                            onImageError={(imageIndex) => {
+                                const updated = [...imageReferences];
+                                const cur = updated[currentReferenceIndex!];
+                                const arr: [boolean, boolean] = cur.loadErrors ? [...cur.loadErrors] as [boolean, boolean] : [false, false];
+                                arr[imageIndex] = true;
+                                cur.loadErrors = arr;
+                                setImageReferences(updated);
+                            }}
                         />
                     </div>
                 </section>

@@ -143,9 +143,13 @@
 
 .generated-image-wrapper {
     position: relative;
+    width: 100%;
     flex: 1 1 0;
     max-width: 512px;
     aspect-ratio: 1 / 1;
+    /* Fallback so the wrapper is never 0px tall on browsers/layouts
+       where aspect-ratio might not resolve as expected */
+    min-height: 256px;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -209,9 +213,18 @@
 }
 
 .generated-image {
+    display: block;
     width: 100%;
-    height: 100%;
+    height: auto;
+    max-height: 100%;
     object-fit: cover;
+}
+
+/* Prefer full cover when aspect-ratio is supported and the wrapper height is reliable */
+@supports (aspect-ratio: 1 / 1) {
+  .generated-image {
+    height: 100%;
+  }
 }
 
 .generation-error {
@@ -280,4 +293,61 @@
 .generated-image-wrapper.selected {
     border-color: var(--banana-yellow);
     box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
+}
+
+/* Iterative editing UI additions */
+.version-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(33, 37, 41, 0.85);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.version-nav {
+  position: absolute;
+  top: 8px;
+  right: 48px;
+  display: flex;
+  gap: 4px;
+}
+
+.version-nav .nav-arrow {
+  background: rgba(255,255,255,0.9);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.version-nav .nav-arrow:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.edit-panel {
+  margin-top: 8px;
+}
+
+.edit-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.edit-error {
+  display: block;
+  color: var(--error-red);
+  margin-top: 6px;
+  font-size: 12px;
 }

@@ -50,37 +50,19 @@ export const generateContentWithRetry = async (
 };
 
 export const generateImageFromPrompt = async (ai: GoogleGenAI, prompt: string, styleImagePart?: Part): Promise<string> => {
-    let contents: GenAIRequest['contents'];
-    let config: GenAIRequest['config'];
-
-    if (styleImagePart) {
-        contents = {
-            parts: [{ text: prompt }, styleImagePart]
-        };
-        config = {
-            responseModalities: [Modality.IMAGE, Modality.TEXT],
-        };
-    } else {
-        contents = prompt;
-    }
-
+    // Always request image modality and provide a structured content payload
+    const parts: Part[] = styleImagePart ? [{ text: prompt }, styleImagePart] : [{ text: prompt }];
     const request: GenAIRequest = {
         model: "gemini-2.5-flash-image-preview",
-        contents,
+        contents: { parts },
+        config: {
+            responseModalities: [Modality.IMAGE, Modality.TEXT],
+        },
     };
-    if (config) {
-        request.config = config;
-    }
 
     const response = await generateContentWithRetry(ai, request);
-
-    for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-            const imageData = part.inlineData.data;
-            const mimeType = part.inlineData.mimeType || 'image/png';
-            return `data:${mimeType};base64,${imageData}`;
-        }
-    }
+    const img = extractImageFromCandidates((response as any).candidates || []);
+    if (img) return img;
     throw new Error("API did not return an image. It may have refused the prompt.");
 };
 
@@ -117,4 +99,117 @@ export const generateImageVariation = async (ai: GoogleGenAI, base64ImageWithMim
         }
     }
     throw new Error("API did not return an image variation.");
+};
+
+// --- Iterative Editing (Chat) Helpers ---
+
+// Simple in-memory chat session store keyed by a branch/node id.
+const chatSessions: Map<string, { chat: any; seededWithImageId?: string }> = new Map();
+
+const dataUrlToPart = (base64ImageWithMime: string): Part => {
+    const mimeType = base64ImageWithMime.substring(base64ImageWithMime.indexOf(":") + 1, base64ImageWithMime.indexOf(";"));
+    const data = base64ImageWithMime.split(',')[1];
+    return {
+        inlineData: {
+            mimeType,
+            data,
+        },
+    };
+};
+
+const extractImageFromCandidates = (candidates: any[]): string | null => {
+    for (const cand of candidates || []) {
+        const parts: Part[] = cand?.content?.parts || [];
+        for (const part of parts) {
+            if ((part as any).inlineData) {
+                const imageData = (part as any).inlineData.data;
+                const mimeType = (part as any).inlineData.mimeType || 'image/png';
+                return `data:${mimeType};base64,${imageData}`;
+            }
+        }
+    }
+    return null;
+};
+
+/**
+ * Ensures a chat session for a given branch key. If chat is available in the SDK, uses it; otherwise
+ * falls back to unary generateContent calls for each edit.
+ */
+export const ensureChatForBranch = async (
+    ai: GoogleGenAI,
+    branchKey: string,
+    baseImageDataUrl: string
+): Promise<{ mode: 'chat' | 'unary'; chat?: any; baseImagePart: Part }> => {
+    const baseImagePart = dataUrlToPart(baseImageDataUrl);
+    const hasChat = typeof (ai as any)?.chats?.create === 'function';
+    if (!hasChat) {
+        return { mode: 'unary', baseImagePart };
+    }
+
+    const existing = chatSessions.get(branchKey);
+    if (existing) {
+        return { mode: 'chat', chat: existing.chat, baseImagePart };
+    }
+
+    // Create a new chat seeded with the base image on first message.
+    const chat = (ai as any).chats.create({ model: 'gemini-2.5-flash-image-preview' });
+    chatSessions.set(branchKey, { chat });
+    return { mode: 'chat', chat, baseImagePart };
+};
+
+/**
+ * Sends an edit instruction using chat mode if available; otherwise uses unary generateContent.
+ * Returns base64 data URL of the new image.
+ */
+export const generateEditedImage = async (
+    ai: GoogleGenAI,
+    branchKey: string,
+    currentImageDataUrl: string,
+    instruction: string
+): Promise<string> => {
+    const { mode, chat, baseImagePart } = await ensureChatForBranch(ai, branchKey, currentImageDataUrl);
+
+    if (mode === 'chat' && chat) {
+        // For the first turn on a branch, include the image; subsequent turns can be text-only.
+        const state = chatSessions.get(branchKey);
+        const isFirstTurn = !state?.seededWithImageId;
+
+        const response = isFirstTurn
+            ? await chat.sendMessage({
+                // Many SDKs accept a rich message object; if not, the fallback below handles it.
+                message: instruction,
+                // Some SDKs allow parts: if available, try to include the image part.
+                parts: [baseImagePart, { text: instruction }]
+              }).catch(async () => {
+                // Fallback: if parts are not supported, try plain message first, then unary.
+                return null as any;
+              })
+            : await chat.sendMessage({ message: instruction }).catch(() => null as any);
+
+        if (response?.candidates) {
+            const img = extractImageFromCandidates(response.candidates as any[]);
+            if (img) {
+                if (isFirstTurn && state) {
+                    state.seededWithImageId = branchKey;
+                    chatSessions.set(branchKey, state);
+                }
+                return img;
+            }
+        }
+        // If chat path failed to return an image, fall back to unary below.
+    }
+
+    // Unary fallback: send current image + instruction in a single turn.
+    const response = await generateContentWithRetry(ai, {
+        model: 'gemini-2.5-flash-image-preview',
+        contents: {
+            parts: [dataUrlToPart(currentImageDataUrl), { text: instruction }],
+        },
+        config: {
+            responseModalities: [Modality.IMAGE, Modality.TEXT],
+        },
+    });
+    const img = extractImageFromCandidates((response as any).candidates || []);
+    if (!img) throw new Error('Edit did not return an image.');
+    return img;
 };
