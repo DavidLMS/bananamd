@@ -9,6 +9,7 @@ import { ImageReferenceItem, type ImageReference } from './components/ImageRefer
 import { fileToGenerativePart, generateContentWithRetry, generateImageFromPrompt, generateImageVariation } from './services/genai';
 
 export const App = () => {
+    const [view, setView] = useState<'upload' | 'generation'>('upload');
     const [markdownFile, setMarkdownFile] = useState<File | null>(null);
     const [markdownContent, setMarkdownContent] = useState<string | null>(null);
     const [styleImageFile, setStyleImageFile] = useState<File | null>(null);
@@ -26,6 +27,9 @@ export const App = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalContent, setModalContent] = useState('');
 
+    const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+    const [promptModalContent, setPromptModalContent] = useState('');
+
     const openModal = (content: string) => {
         setModalContent(content);
         setIsModalOpen(true);
@@ -34,6 +38,16 @@ export const App = () => {
     const closeModal = () => {
         setIsModalOpen(false);
         setModalContent('');
+    };
+
+    const openPromptModal = (prompt: string) => {
+        setPromptModalContent(prompt);
+        setIsPromptModalOpen(true);
+    };
+
+    const closePromptModal = () => {
+        setIsPromptModalOpen(false);
+        setPromptModalContent('');
     };
 
     useEffect(() => {
@@ -206,6 +220,7 @@ export const App = () => {
             setImageReferences(references);
             if(references.length > 0) {
                 setCurrentReferenceIndex(0);
+                setView('generation');
             }
 
         } catch (error) {
@@ -215,6 +230,18 @@ export const App = () => {
         } finally {
             setIsParsing(false);
         }
+    };
+
+    const handleStartOver = () => {
+        setView('upload');
+        setMarkdownFile(null);
+        setMarkdownContent(null);
+        setStyleImageFile(null);
+        setMaintainStyle(false);
+        setImageReferences([]);
+        setCurrentReferenceIndex(null);
+        setMarkdownError('');
+        generationTriggered.current.clear();
     };
     
     useEffect(() => {
@@ -298,6 +325,18 @@ export const App = () => {
         }
     };
 
+    const handleImageSelect = (imageIndex: number) => {
+        if (currentReferenceIndex === null) return;
+
+        const updatedReferences = [...imageReferences];
+        updatedReferences[currentReferenceIndex].selectedIndex = imageIndex;
+        setImageReferences(updatedReferences);
+
+        setTimeout(() => {
+            handleNext();
+        }, 300); // Small delay to show selection before advancing
+    };
+
     const handlePrevious = () => {
         if (currentReferenceIndex !== null) {
             setCurrentReferenceIndex(Math.max(0, currentReferenceIndex - 1));
@@ -319,79 +358,84 @@ export const App = () => {
 
             {templateError && <p className="error-text">{templateError}</p>}
 
-            <div className="upload-section">
-                <DropZone
-                    id="markdown-upload"
-                    onFileSelect={handleMarkdownSelect}
-                    acceptedTypes=".md,.zip"
-                    file={markdownFile}
-                    label="Upload a .md file or a .zip archive containing your project."
-                    dragLabel="Drop your Markdown file here"
-                    error={markdownError}
-                />
-            </div>
-
-            <div className="advanced-options">
-                <button 
-                    className="advanced-options-toggle"
-                    onClick={() => setShowAdvanced(!showAdvanced)}
-                    aria-expanded={showAdvanced}
-                    aria-controls="advanced-content"
-                >
-                    Advanced Options
-                    <ChevronIcon expanded={showAdvanced} />
-                </button>
-                <div id="advanced-content" className={`advanced-options-content ${showAdvanced ? 'show' : ''}`}>
+            {view === 'upload' && (
+                <>
                     <div className="upload-section">
-                         <DropZone
-                            id="style-image-upload"
-                            onFileSelect={setStyleImageFile}
-                            acceptedTypes="image/png,image/jpeg,image/webp"
-                            file={styleImageFile}
-                            label="Upload a style reference image (optional)."
-                            dragLabel="Drop style image here"
-                            error={''}
+                        <DropZone
+                            id="markdown-upload"
+                            onFileSelect={handleMarkdownSelect}
+                            acceptedTypes=".md,.zip"
+                            file={markdownFile}
+                            label="Upload a .md file or a .zip archive containing your project."
+                            dragLabel="Drop your Markdown file here"
+                            error={markdownError}
                         />
                     </div>
-                    <div className="options">
-                        <label className="checkbox-container">
-                            <input
-                                type="checkbox"
-                                checked={maintainStyle}
-                                onChange={(e) => setMaintainStyle(e.target.checked)}
-                                disabled // This option is for variations, maybe it should be inside the item? For now, let's keep it simple.
-                            />
-                            <span className="checkbox-custom">
-                                <CheckIcon />
-                            </span>
-                            Maintain original image style (for variations)
-                        </label>
-                    </div>
-                </div>
-            </div>
-            
-            <div className="propose-section">
-                {isParsing ? (
-                    <div className="generation-step">
-                        <div className="spinner-container">
-                            <Spinner />
-                        </div>
-                        <p className="generation-status-indicator">Parsing Markdown and finding image references...</p>
-                    </div>
-                ) : (
-                    <button
-                        className="propose-button"
-                        onClick={parseAndFindReferences}
-                        disabled={!markdownFile || isParsing}
-                    >
-                        {imageReferences.length > 0 ? 'Start Over' : 'Find Images & Generate'}
-                    </button>
-                )}
-            </div>
 
-            {currentReferenceIndex !== null && imageReferences.length > 0 && (
+                    <div className="advanced-options">
+                        <button 
+                            className="advanced-options-toggle"
+                            onClick={() => setShowAdvanced(!showAdvanced)}
+                            aria-expanded={showAdvanced}
+                            aria-controls="advanced-content"
+                        >
+                            Advanced Options
+                            <ChevronIcon expanded={showAdvanced} />
+                        </button>
+                        <div id="advanced-content" className={`advanced-options-content ${showAdvanced ? 'show' : ''}`}>
+                            <div className="upload-section">
+                                <DropZone
+                                    id="style-image-upload"
+                                    onFileSelect={setStyleImageFile}
+                                    acceptedTypes="image/png,image/jpeg,image/webp"
+                                    file={styleImageFile}
+                                    label="Upload a style reference image (optional)."
+                                    dragLabel="Drop style image here"
+                                    error={''}
+                                />
+                            </div>
+                            <div className="options">
+                                <label className="checkbox-container">
+                                    <input
+                                        type="checkbox"
+                                        checked={maintainStyle}
+                                        onChange={(e) => setMaintainStyle(e.target.checked)}
+                                        disabled // This option is for variations, maybe it should be inside the item? For now, let's keep it simple.
+                                    />
+                                    <span className="checkbox-custom">
+                                        <CheckIcon />
+                                    </span>
+                                    Maintain original image style (for variations)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="propose-section">
+                        {isParsing ? (
+                            <div className="generation-step">
+                                <div className="spinner-container">
+                                    <Spinner />
+                                </div>
+                                <p className="generation-status-indicator">Parsing Markdown and finding image references...</p>
+                            </div>
+                        ) : (
+                            <button
+                                className="propose-button"
+                                onClick={parseAndFindReferences}
+                                disabled={!markdownFile || isParsing}
+                            >
+                                Find Images & Generate
+                            </button>
+                        )}
+                    </div>
+                </>
+            )}
+
+            {view === 'generation' && currentReferenceIndex !== null && imageReferences.length > 0 && (
                 <section className="results-section">
                     <div className="results-navigation">
+                        <button className="nav-button" onClick={handleStartOver}>Start Over</button>
                         <button className="nav-button" onClick={handlePrevious} disabled={currentReferenceIndex === 0}>
                             Previous
                         </button>
@@ -408,12 +452,15 @@ export const App = () => {
                             reference={imageReferences[currentReferenceIndex]}
                             onOpenContext={openModal}
                             onGenerateVariation={handleGenerateVariation}
+                            onSelect={handleImageSelect}
+                            onOpenPrompt={openPromptModal}
                         />
                     </div>
                 </section>
             )}
             
             <Modal isOpen={isModalOpen} onClose={closeModal} content={modalContent} />
+            <Modal isOpen={isPromptModalOpen} onClose={closePromptModal} content={promptModalContent} title="Generation Prompt" />
         </div>
     );
 };
