@@ -7,6 +7,9 @@
   <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-CC%20BY%204.0-yellow.svg?longCache=true" alt="CC BY 4.0 License">
     </a>
+  <a href="https://deepwiki.com/DavidLMS/bananamd">
+      <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">
+    </a>
 </p>
 
 # BananaMD – Nano Banana Hackathon
