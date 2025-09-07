@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "Romero Santos"
+    given-names: "David"
+title: "BananaMD: AI-powered Markdown illustration with Nano Banana (Gemini 2.5 Flash Image Preview)"
+date-released: 2025-09-07
+url: "https://github.com/DavidLMS/bananamd"
+repository-code: "https://github.com/DavidLMS/bananamd"
+abstract: >
+  BananaMD is a client-side application that rapidly illustrates Markdown
+  documents and slide decks using Gemini 2.5 Flash Image Preview (a.k.a.
+  Nano Banana). The app detects image references in Markdown or in a zipped
+  project, proposes two high‑quality candidates per reference, supports
+  iterative text edits with version history, and exports an updated Markdown
+  file together with all images using descriptive, accessible filenames and
+  generated alt text. Existing images (local, data URLs, and downloadable
+  HTTP URLs) are treated as starting points for style‑transfer/improve flows;
+  otherwise images are generated from document‑aware text prompts.
+keywords:
+  - markdown
+  - nano-banana
+  - gemini-2.5-flash-image-preview
+  - gemini-2.5-flash
+  - ai-image-generation
+  - accessibility
+  - slides
+  - image-editing
+license: "MIT"
+version: "0.1.0"
