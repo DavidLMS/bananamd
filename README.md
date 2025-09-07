@@ -36,7 +36,7 @@ It's not magic; it's craft with new tools. Sometimes I want a brand‑new image;
 
 **This project was built during the [Nano Banana Hackathon](https://www.kaggle.com/competitions/banana/) weekend (September 6-7, 2025).** 
 
-📹 **[Watch the demo video](https://youtu.be/ls6mLKCrJXA)** *(Sorry for the screen capture quality—ran out of time to polish it!)*
+📹 **[Watch the demo video](https://youtu.be/7Lcjq8qfSRU)** *(Sorry for the screen capture quality—ran out of time to polish it!)*
 
 ## What it does
 
