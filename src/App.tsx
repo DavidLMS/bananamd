@@ -29,6 +29,8 @@ export const App = () => {
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalContent, setModalContent] = useState('');
+    const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+    const [imageModalSrc, setImageModalSrc] = useState('');
 
     const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
     const [promptModalContent, setPromptModalContent] = useState('');
@@ -37,6 +39,7 @@ export const App = () => {
     const [exporting, setExporting] = useState(false);
     const [exportError, setExportError] = useState('');
     const [exportPreview, setExportPreview] = useState('');
+    const [exportPreviewHtml, setExportPreviewHtml] = useState('');
     const [zipUrl, setZipUrl] = useState<string | null>(null);
     const [zipAllUrl, setZipAllUrl] = useState<string | null>(null);
 
@@ -48,6 +51,15 @@ export const App = () => {
     const closeModal = () => {
         setIsModalOpen(false);
         setModalContent('');
+    };
+
+    const openImageModal = (src: string) => {
+        setImageModalSrc(src);
+        setIsImageModalOpen(true);
+    };
+    const closeImageModal = () => {
+        setIsImageModalOpen(false);
+        setImageModalSrc('');
     };
 
     const openPromptModal = (prompt: string) => {
@@ -169,7 +181,7 @@ export const App = () => {
             // Sort references by startIndex for deterministic replacement order
             const sorted = [...imageReferences].sort((a, b) => (a.startIndex || 0) - (b.startIndex || 0));
 
-            const fileInfos: { ref: ImageReference; filename: string; alt: string; relPath: string }[] = [];
+            const fileInfos: { ref: ImageReference; filename: string; alt: string; relPath: string; dataUrl: string }[] = [];
             const slugByRef = new Map<number, string>();
 
             for (const ref of sorted) {
@@ -181,7 +193,8 @@ export const App = () => {
                 const filename = `${ref.lineNumber}-${slug}.${ext}`;
                 slugByRef.set(ref.lineNumber, slug);
                 imagesFolder!.file(filename, base64, { base64: true });
-                fileInfos.push({ ref, filename, alt, relPath: `images/${filename}` });
+                const dataUrl = `data:${mimeType};base64,${base64}`;
+                fileInfos.push({ ref, filename, alt, relPath: `images/${filename}`, dataUrl });
             }
 
             // Rebuild Markdown content with new alts and image paths
@@ -209,6 +222,35 @@ export const App = () => {
 
             // Add updated markdown file
             zip.file(mdBaseName, rebuilt);
+
+            // Build HTML preview by inlining image data URLs
+            const pathToData = new Map<string, string>();
+            for (const fi of fileInfos) pathToData.set(fi.relPath, fi.dataUrl);
+
+            const escapeHtml = (s: string) => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]!));
+            let html = rebuilt;
+            // Replace Markdown images with inline HTML <img>
+            html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_m, alt, src) => {
+                const norm = src.replace(/^\.\//,'');
+                const data = pathToData.get(src) || pathToData.get(norm) || src;
+                return `<img alt="${escapeHtml(String(alt||''))}" src="${data}">`;
+            });
+            // Replace HTML <img src="..."> paths to data URLs when available
+            html = html.replace(/<img([^>]*?)src\s*=\s*(["'])([^"']+?)\2([^>]*)>/gi, (m, pre, q, src, post) => {
+                const norm = src.replace(/^\.\//,'');
+                const data = pathToData.get(src) || pathToData.get(norm);
+                return data ? `<img${pre}src=${q}${data}${q}${post}>` : m;
+            });
+            // Very light Markdown headings/paragraphs for the rest (optional)
+            const lines = html.split(/\n\n+/).map(block => {
+                if (/^###\s+/.test(block)) return `<h3>${escapeHtml(block.replace(/^###\s+/,''))}</h3>`;
+                if (/^##\s+/.test(block)) return `<h2>${escapeHtml(block.replace(/^##\s+/,'').trim())}</h2>`;
+                if (/^#\s+/.test(block)) return `<h1>${escapeHtml(block.replace(/^#\s+/,'').trim())}</h1>`;
+                if (/^<img/.test(block)) return block; // already HTML
+                if (/^<.+>/.test(block)) return block; // leave other HTML
+                return `<p>${escapeHtml(block)}</p>`;
+            }).join('\n');
+            setExportPreviewHtml(lines);
 
             // Build optional ZIP with all generated images
             const zipAll = new JSZip();
@@ -267,6 +309,7 @@ export const App = () => {
             setZipUrl(mainUrl);
             setZipAllUrl(allUrl);
             setExportPreview(rebuilt);
+            
         } catch (e: any) {
             console.error('Export failed:', e);
             setExportError(e?.message || 'Export failed');
@@ -303,7 +346,15 @@ export const App = () => {
         loadTemplates();
     }, []);
 
-    const handleMarkdownSelect = async (file: File) => {
+    const handleMarkdownSelect = async (file: File | null) => {
+        if (!file) {
+            setMarkdownFile(null);
+            setMarkdownContent(null);
+            setMarkdownError('');
+            setImageReferences([]);
+            setCurrentReferenceIndex(null);
+            return;
+        }
         setMarkdownFile(null);
         setMarkdownContent(null);
         setMarkdownError('');
@@ -570,7 +621,11 @@ export const App = () => {
                             const node: ImageVersionNode = { id, imageData: right, parentId: null, childrenIds: [], createdAt: Date.now() };
                             histories[1] = { nodes: { [id]: node }, rootId: id, currentId: id, order: [id] };
                         }
-                        return { ...r, isGeneratingImproved: false, isGeneratingVariation: false, generatedImproved: improved || null, generatedVariation: right || null, histories };
+                        const improvedPrompt = styleImagePart
+                          ? `Redraw the BASE image entirely in the artistic style of the attached reference. Preserve composition and core subjects.${ref.alt ? ` Context: "${ref.alt}".` : ''}`
+                          : `Improve this image: enhance clarity, lighting, dynamic range, and detail; preserve composition and subject.${ref.alt ? ` Context: "${ref.alt}".` : ''}`;
+                        const proposedPrompts: [string, string] = [improvedPrompt, newPrompt || ''];
+                        return { ...r, isGeneratingImproved: false, isGeneratingVariation: false, generatedImproved: improved || null, generatedVariation: right || null, histories, proposedPrompts };
                     }));
                     return;
                 }
@@ -916,16 +971,31 @@ export const App = () => {
     }, [view, currentReferenceIndex, handleImageSelect]);
 
     return (
-        <div className="app-container">
-            <header>
-                <h1>BananaMD</h1>
-                <p>Illustrate your Markdown documents with AI-generated images.</p>
+        <>
+            {view !== 'upload' && (
+            <header className="app-header">
+                <div className="brand">
+                    <img className="app-logo" src="assets/bananamd-logo.svg" alt="BananaMD logo" />
+                    <div className="brand-text">
+                        <h1>BananaMD</h1>
+                        <p className="tagline">Illustrate your Markdown with AI</p>
+                    </div>
+                </div>
+                <nav className="header-nav" aria-hidden="true"></nav>
+                <div className="header-actions">
+                    <button className="cta-btn" type="button" onClick={handleStartOver}>Start Over</button>
+                </div>
             </header>
-
+            )}
+            <div className="app-container">
             {templateError && <p className="error-text">{templateError}</p>}
 
             {view === 'upload' && (
                 <>
+                    <section className="hero">
+                        <img src="assets/logo-text-banana.svg" alt="Nano Banana" className="hero-logo" />
+                        <p className="hero-sub">Illustrate your Markdown with AI</p>
+                    </section>
                     <div className="upload-section">
                         <DropZone
                             id="markdown-upload"
@@ -992,7 +1062,7 @@ export const App = () => {
                                 onClick={parseAndFindReferences}
                                 disabled={!markdownFile || isParsing}
                             >
-                                Find Images & Generate
+                                Generate
                             </button>
                         )}
                     </div>
@@ -1002,7 +1072,6 @@ export const App = () => {
             {view === 'generation' && !allImagesSelected && currentReferenceIndex !== null && imageReferences.length > 0 && (
                 <section className="results-section">
                     <div className="results-navigation">
-                        <button className="nav-button" onClick={handleStartOver}>Start Over</button>
                         <button className="nav-button" onClick={handlePrevious} disabled={currentReferenceIndex === 0}>
                             Previous
                         </button>
@@ -1024,6 +1093,7 @@ export const App = () => {
                             onRegenerate={handleRegenerateImage}
                             onEditInstruction={handleEditInstruction}
                             onNavigateHistory={handleNavigateHistory}
+                            onZoomImage={openImageModal}
                             onImageError={(imageIndex) => {
                                 const updated = [...imageReferences];
                                 const cur = updated[currentReferenceIndex!];
@@ -1037,35 +1107,52 @@ export const App = () => {
                 </section>
             )}
             {view === 'generation' && allImagesSelected && (
-                <section className="results-section" style={{ marginTop: '1rem' }}>
-                    <div className="results-navigation" style={{ justifyContent: 'space-between' }}>
-                        <button className="nav-button" onClick={handleStartOver}>Start Over</button>
-                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            {exporting && (<span>Building…</span>)}
-                            {!exporting && zipUrl && (
-                                <>
-                                    <a className="nav-button" href={zipUrl} download={`bananamd-package.zip`}>Download ZIP</a>
-                                    {zipAllUrl && (
-                                        <a className="nav-button" href={zipAllUrl} download={`bananamd-all-images.zip`}>Download All Images</a>
-                                    )}
-                                </>
+                <section className="results-section" style={{ marginTop: '1rem', textAlign: 'center' }}>
+                    {exporting ? (
+                        <div className="generation-step big">
+                            <div className="spinner-container"><div className="spinner big"></div></div>
+                            <p className="generation-status-indicator">Building package...</p>
+                        </div>
+                    ) : (
+                        <div className="final-download">
+                            <div className="success-badge" aria-hidden>
+                                <CheckIcon />
+                            </div>
+                            <h2 className="final-title">Your slides are ready!</h2>
+                            <p className="final-sub">Download the .zip file containing your Markdown file and generated images.</p>
+                            {zipUrl && (
+                                <p className="final-actions">
+                                    <a className="primary-download" href={zipUrl} download={`bananamd-package.zip`}>Download .zip</a>
+                                </p>
+                            )}
+                            {zipAllUrl && (
+                                <p className="final-secondary">
+                                    Want all generated images as a keepsake? 
+                                    <a className="secondary-download" href={zipAllUrl} download={`bananamd-all-images.zip`}>Download all images</a>
+                                </p>
                             )}
                         </div>
-                    </div>
+                    )}
                     {exportError && <p className="generation-error">{exportError}</p>}
-                    {exportPreview && (
+                    {(exportPreviewHtml || exportPreview) && (
                         <div className="image-reference-item" style={{ marginTop: '1rem' }}>
                             <div className="item-header">
-                                <span className="item-path">Updated Markdown Preview</span>
+                                <span className="item-path">Markdown Preview</span>
                             </div>
-                            <pre style={{ whiteSpace: 'pre-wrap', textAlign: 'left' }}><code>{exportPreview}</code></pre>
+                            {exportPreviewHtml ? (
+                                <div className="markdown-preview" dangerouslySetInnerHTML={{ __html: exportPreviewHtml }} />
+                            ) : (
+                                <pre style={{ whiteSpace: 'pre-wrap', textAlign: 'left' }}><code>{exportPreview}</code></pre>
+                            )}
                         </div>
                     )}
                 </section>
             )}
             
             <Modal isOpen={isModalOpen} onClose={closeModal} content={modalContent} />
+            <Modal isOpen={isImageModalOpen} onClose={closeImageModal} imageSrc={imageModalSrc} title="Image Preview" />
             <Modal isOpen={isPromptModalOpen} onClose={closePromptModal} content={promptModalContent} title="Generation Prompt" />
         </div>
+        </>
     );
 };

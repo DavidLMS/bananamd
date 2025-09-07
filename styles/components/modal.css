@@ -13,10 +13,10 @@
 
 .modal-content {
     background: var(--card-background);
-    padding: 2rem;
+    padding: 1.25rem 1.5rem;
     border-radius: 12px;
-    max-width: 90%;
-    width: 700px;
+    max-width: 92%;
+    width: 820px;
     max-height: 80vh;
     display: flex;
     flex-direction: column;
@@ -34,7 +34,7 @@
 
 .modal-header h3 {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: 1.1rem;
 }
 
 .modal-close-button {
@@ -56,4 +56,11 @@
     border-radius: 6px;
     white-space: pre-wrap;
     word-wrap: break-word;
+}
+
+.modal-body img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
 }

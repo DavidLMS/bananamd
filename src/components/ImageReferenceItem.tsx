@@ -1,5 +1,6 @@
 import React from 'react';
 import { InlineSpinner } from './spinners';
+import { EyeIcon, ZoomIcon } from './icons';
 
 export interface ImageReference {
     lineNumber: number;
@@ -58,9 +59,10 @@ interface ImageReferenceItemProps {
     onEditInstruction: (imageIndex: 0 | 1, instruction: string) => void;
     onNavigateHistory: (imageIndex: 0 | 1, direction: 'prev' | 'next') => void;
     onImageError: (imageIndex: 0 | 1) => void;
+    onZoomImage: (src: string) => void;
 }
 
-export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariation, onSelect, onOpenPrompt, onRegenerate, onEditInstruction, onNavigateHistory, onImageError }: ImageReferenceItemProps) => {
+export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariation, onSelect, onOpenPrompt, onRegenerate, onEditInstruction, onNavigateHistory, onImageError, onZoomImage }: ImageReferenceItemProps) => {
     const { 
         path, alt, lineNumber, status, context,
         isGeneratingPrompts, proposedPrompts,
@@ -99,23 +101,28 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
         const [value, setValue] = React.useState('');
         const history = histories?.[imageIndex];
         const isEditing = history?.isEditing;
-        const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-            if (e.key === 'Enter' && value.trim()) {
-                onEditInstruction(imageIndex, value.trim());
-                setValue('');
+        const submit = () => {
+            if (!value.trim() || isEditing) return;
+            onEditInstruction(imageIndex, value.trim());
+            setValue('');
+        };
+        const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                submit();
             }
         };
         return (
-            <div className="edit-panel">
-                <input
-                    className="edit-input"
-                    type="text"
-                    placeholder={isEditing ? 'Editing…' : 'Type edit instructions and press Enter'}
+            <div className="edit-panel modern">
+                <textarea
+                    className="edit-textarea"
+                    placeholder={isEditing ? 'Editing…' : "Tell us what you'd like to change..."}
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
                     onKeyDown={onKeyDown}
                     disabled={!!isEditing}
+                    rows={3}
                 />
+                <button className="send-button" aria-label="Apply edit" onClick={(e) => { e.stopPropagation(); submit(); }} disabled={!!isEditing}>→</button>
                 {history?.error && <span className="edit-error">{history.error}</span>}
             </div>
         );
@@ -125,16 +132,17 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
         <div className={`image-reference-item status-${status}`} aria-live="polite">
             <div className="item-header">
                 <span className="item-path" title={path}>{path}</span>
-                <span className="item-line">L{lineNumber}</span>
+                <button className="context-button" onClick={() => onOpenContext(context)}>
+                    <EyeIcon />
+                    <span>See context</span>
+                </button>
             </div>
             {alt && <p className="item-alt">Alt: "{alt}"</p>}
             
             <div className="item-body">
                 {status === 'existing' && (
                     <div className="generation-result">
-                        <button className="context-button" onClick={() => onOpenContext(context)}>
-                            See context
-                        </button>
+                        {/* context button moved to header */}
                         {(reference.isGeneratingImproved || isGeneratingVariation) ? (
                             <div className="generated-images-container">
                                 <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Loading image 1"></div>
@@ -151,6 +159,12 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                         ) : (
                                             <div className="generated-image-wrapper placeholder">Image 1 failed</div>
                                         )}
+                                        {(histories?.[0] || reference.generatedImproved) && (
+                                            <button className="zoom-button" aria-label="Zoom image" onClick={(e) => { e.stopPropagation(); const src = histories?.[0] ? histories[0]!.nodes[histories[0]!.currentId].imageData : (reference.generatedImproved || ''); if (src) onZoomImage(src); }}><ZoomIcon /></button>
+                                        )}
+                                        {(histories?.[0] || reference.generatedImproved) && (
+                                        <button className="info-button" title="View generation prompt" onClick={(e) => { e.stopPropagation(); onOpenPrompt(reference.proposedPrompts?.[0] || 'No prompt available'); }}>i</button>
+                                        )}
                                     </div>
                                     <EditInput imageIndex={0} />
                                 </div>
@@ -162,6 +176,12 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                             <img src={histories?.[1] ? histories[1]!.nodes[histories[1]!.currentId].imageData : generatedVariation!} alt="Generated image option 2" className="generated-image" onError={(e) => { e.stopPropagation(); onImageError(1); }} />
                                         ) : (
                                             <div className="generated-image-wrapper placeholder">Image 2 failed</div>
+                                        )}
+                                        {(histories?.[1] || generatedVariation) && (
+                                            <button className="zoom-button" aria-label="Zoom image" onClick={(e) => { e.stopPropagation(); const src = histories?.[1] ? histories[1]!.nodes[histories[1]!.currentId].imageData : (generatedVariation || ''); if (src) onZoomImage(src); }}><ZoomIcon /></button>
+                                        )}
+                                        {(histories?.[1] || generatedVariation) && (
+                                        <button className="info-button" title="View generation prompt" onClick={(e) => { e.stopPropagation(); onOpenPrompt(reference.proposedPrompts?.[1] || 'No prompt available'); }}>i</button>
                                         )}
                                     </div>
                                     <EditInput imageIndex={1} />
@@ -186,7 +206,7 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                     <InlineSpinner />
                                     <span>Generating images... This may take a moment.</span>
                                 </div>
-                                <button className="context-button" disabled>See context</button>
+                                {/* Context button hidden during loading */}
                                 <div className="generated-images-container">
                                     <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Loading image 1"></div>
                                     <div className="generated-image-wrapper skeleton" aria-busy="true" aria-label="Loading image 2"></div>
@@ -196,9 +216,7 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                         {generationError && <p className="generation-error">{generationError}</p>}
                         {generatedImages && (
                             <div className="generation-result">
-                                <button className="context-button" onClick={() => onOpenContext(context)}>
-                                    See context
-                                </button>
+                                {/* context button moved to header */}
                                 <div className="generated-images-container">
                                     {generatedImages[0] && reference.proposedPrompts?.[0] && !reference.loadErrors?.[0] ? (
                                         <div className="image-column">
@@ -206,14 +224,21 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                             {renderVersionBadge(histories?.[0])}
                                             {renderNavArrows(histories?.[0], 0)}
                                             <img src={histories?.[0] ? histories[0]!.nodes[histories[0]!.currentId].imageData : generatedImages[0]!} alt="Generated image option 1" className="generated-image" onError={(e) => { e.stopPropagation(); onImageError(0); }} />
-                                            <button className="info-button" onClick={(e) => { e.stopPropagation(); onOpenPrompt(reference.proposedPrompts![0]); }}>i</button>
-                                        </div>
-                                        <EditInput imageIndex={0} />
-                                        </div>
+                                            <button className="zoom-button" aria-label="Zoom image" onClick={(e) => { e.stopPropagation(); const src = histories?.[0] ? histories[0]!.nodes[histories[0]!.currentId].imageData : (generatedImages[0] || ''); if (src) onZoomImage(src); }}><ZoomIcon /></button>
+                                            <button className="info-button" title="View generation prompt" onClick={(e) => { e.stopPropagation(); onOpenPrompt(reference.proposedPrompts?.[0] || 'No prompt available'); }}>i</button>
+                                          </div>
+                                          <EditInput imageIndex={0} />
+                                          </div>
                                     ) : (
                                         <div className="generated-image-wrapper placeholder">
-                                            Image 1 failed
-                                            {reference.isRetrying ? <InlineSpinner /> : <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(0); }}>Try again</button>}
+                                            {reference.isRetrying ? (
+                                                <InlineSpinner />
+                                            ) : (
+                                                <>
+                                                    Image 1 failed
+                                                    <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(0); }}>Try again</button>
+                                                </>
+                                            )}
                                         </div>
                                     )}
                                     {generatedImages[1] && reference.proposedPrompts?.[1] && !reference.loadErrors?.[1] ? (
@@ -221,15 +246,22 @@ export const ImageReferenceItem = ({ reference, onOpenContext, onGenerateVariati
                                         <div className={`generated-image-wrapper ${reference.selectedIndex === 1 ? 'selected' : ''}`} onClick={() => onSelect(1)}>
                                             {renderVersionBadge(histories?.[1])}
                                             {renderNavArrows(histories?.[1], 1)}
-                                            <img src={histories?.[1] ? histories[1]!.nodes[histories[1]!.currentId].imageData : generatedImages[1]!} alt="Generated image option 2" className="generated-image" onError={(e) => { e.stopPropagation(); onImageError(1); }} />
-                                            <button className="info-button" onClick={(e) => { e.stopPropagation(); onOpenPrompt(reference.proposedPrompts![1]); }}>i</button>
-                                        </div>
-                                        <EditInput imageIndex={1} />
-                                        </div>
+                                          <img src={histories?.[1] ? histories[1]!.nodes[histories[1]!.currentId].imageData : generatedImages[1]!} alt="Generated image option 2" className="generated-image" onError={(e) => { e.stopPropagation(); onImageError(1); }} />
+                                          <button className="zoom-button" aria-label="Zoom image" onClick={(e) => { e.stopPropagation(); const src = histories?.[1] ? histories[1]!.nodes[histories[1]!.currentId].imageData : (generatedImages[1] || ''); if (src) onZoomImage(src); }}><ZoomIcon /></button>
+                                          <button className="info-button" title="View generation prompt" onClick={(e) => { e.stopPropagation(); onOpenPrompt(reference.proposedPrompts?.[1] || 'No prompt available'); }}>i</button>
+                                          </div>
+                                          <EditInput imageIndex={1} />
+                                          </div>
                                     ) : (
                                         <div className="generated-image-wrapper placeholder">
-                                            Image 2 failed
-                                            {reference.isRetrying ? <InlineSpinner /> : <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(1); }}>Try again</button>}
+                                            {reference.isRetrying ? (
+                                                <InlineSpinner />
+                                            ) : (
+                                                <>
+                                                    Image 2 failed
+                                                    <button className="retry-button" onClick={(e) => { e.stopPropagation(); onRegenerate(1); }}>Try again</button>
+                                                </>
+                                            )}
                                         </div>
                                     )}
                                 </div>

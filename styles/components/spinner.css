@@ -6,16 +6,17 @@
 
 .spinner {
   border: 4px solid var(--disabled-bg);
-  border-top: 4px solid var(--banana-yellow);
+  border-top: 4px solid var(--primary);
   border-radius: 50%;
   width: 40px;
   height: 40px;
   animation: spin 1s linear infinite;
 }
+.spinner.big { width: 64px; height: 64px; border-width: 6px; border-top-width: 6px; }
 
 .inline-spinner {
   border: 2px solid var(--disabled-bg);
-  border-top: 2px solid var(--banana-yellow);
+  border-top: 2px solid var(--primary);
   border-radius: 50%;
   width: 16px;
   height: 16px;
@@ -29,6 +30,7 @@
   align-items: center;
   width: 100%;
 }
+.generation-step.big { padding: 3rem 0; }
 
 .generation-status-indicator {
   display: flex;

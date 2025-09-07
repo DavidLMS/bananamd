@@ -1,6 +1,6 @@
 .results-section {
   text-align: left;
-  margin-top: 2.5rem;
+  margin-top: 1rem;
 }
 
 .results-navigation {
@@ -27,18 +27,14 @@
 .image-reference-item {
   background-color: var(--card-background);
   border: 1px solid var(--border-color);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.02);
   border-radius: 8px;
   padding: 1rem 1.5rem;
   transition: background-color 0.2s ease;
 }
 
-.image-reference-item.status-existing {
-  border-left: 4px solid var(--light-text);
-}
-
-.image-reference-item.status-to-generate {
-  border-left: 4px solid var(--banana-yellow);
-}
+.image-reference-item.status-existing { border-left: none; }
+.image-reference-item.status-to-generate { border-left: none; }
 
 .item-header {
   display: flex;
@@ -98,7 +94,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  color: var(--light-text);
+  color: var(--muted-text);
   font-size: 0.9rem;
   margin-bottom: 1rem;
 }
@@ -136,8 +132,9 @@
 }
 
 .generated-images-container {
-    display: flex;
-    gap: 1rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
     justify-content: center;
 }
 
@@ -145,18 +142,17 @@
     position: relative;
     width: 100%;
     flex: 1 1 0;
-    max-width: 512px;
-    aspect-ratio: 1 / 1;
-    /* Fallback so the wrapper is never 0px tall on browsers/layouts
-       where aspect-ratio might not resolve as expected */
-    min-height: 256px;
+    max-width: 100%;
+    aspect-ratio: 16 / 9;
+    /* Fallback to avoid 0px height */
+    min-height: 220px;
     display: flex;
     justify-content: center;
     align-items: center;
-    background-color: var(--background-color);
+    background-color: var(--card-background);
     border-radius: 8px;
     overflow: hidden;
-    border: 4px solid transparent;
+    border: 3px solid transparent;
     transition: border-color 0.3s ease;
 }
 
@@ -164,7 +160,7 @@
     position: absolute;
     top: 10px;
     left: 10px;
-    background-color: rgba(0, 0, 0, 0.5);
+    background-color: rgba(0, 0, 0, 0.55);
     color: white;
     border: none;
     border-radius: 50%;
@@ -176,7 +172,7 @@
     text-align: center;
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.2s ease;
 }
 
 .generated-image-wrapper:hover .info-button {
@@ -215,10 +211,30 @@
 .generated-image {
     display: block;
     width: 100%;
-    height: auto;
-    max-height: 100%;
-    object-fit: cover;
+    height: 100%;
+    object-fit: contain; /* show full image with transparent bands */
+    background: transparent;
 }
+
+/* Centered zoom button only */
+.zoom-button {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255,255,255,0.9);
+  border: 1px solid var(--border-color);
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+.generated-image-wrapper:hover .zoom-button { opacity: 1; }
 
 /* Prefer full cover when aspect-ratio is supported and the wrapper height is reliable */
 @supports (aspect-ratio: 1 / 1) {
@@ -291,8 +307,8 @@
 }
 
 .generated-image-wrapper.selected {
-    border-color: var(--banana-yellow);
-    box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
+    border-color: var(--primary);
+    box-shadow: 0 6px 20px rgba(249, 245, 6, 0.25);
 }
 
 /* Iterative editing UI additions */
@@ -300,7 +316,7 @@
   position: absolute;
   top: 8px;
   right: 8px;
-  background: rgba(33, 37, 41, 0.85);
+  background: rgba(28, 28, 13, 0.85);
   color: #fff;
   font-size: 12px;
   line-height: 1;
@@ -350,4 +366,35 @@
   color: var(--error-red);
   margin-top: 6px;
   font-size: 12px;
+}
+
+/* Modern textarea + send button (new_style/images.png vibe) */
+.edit-panel.modern { position: relative; }
+.edit-textarea {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px 56px 12px 12px;
+  font-size: 14px;
+}
+.send-button {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  border: none;
+  background: var(--primary);
+  color: var(--dark-text);
+  font-weight: 900;
+  cursor: pointer;
+}
+.send-button:disabled { opacity: 0.6; cursor: default; }
+
+/* Align context button to the right inside generation-result */
+.generation-result > .context-button {
+  float: right;
 }

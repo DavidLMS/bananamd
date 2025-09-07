@@ -1,9 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { UploadIcon } from './icons';
 
 interface DropZoneProps {
     id: string;
-    onFileSelect: (file: File) => void;
+    onFileSelect: (file: File | null) => void;
     acceptedTypes: string;
     file: File | null;
     label: string;
@@ -14,7 +14,18 @@ interface DropZoneProps {
 
 export const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLabel, error, disabled }: DropZoneProps) => {
     const [isDragging, setIsDragging] = useState(false);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+
+    // Generate a local preview if the selected file is an image
+    useEffect(() => {
+        if (file && file.type && file.type.startsWith('image/')) {
+            const url = URL.createObjectURL(file);
+            setPreviewUrl(url);
+            return () => URL.revokeObjectURL(url);
+        }
+        setPreviewUrl(null);
+    }, [file]);
 
     const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
         if (disabled) return;
@@ -55,6 +66,13 @@ export const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLab
         }
     };
 
+    const handleRemove = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (disabled) return;
+        onFileSelect(null);
+        if (inputRef.current) inputRef.current.value = '';
+    };
+
     const handleClick = () => {
         if (disabled) return;
         inputRef.current?.click();
@@ -78,7 +96,26 @@ export const DropZone = ({ id, onFileSelect, acceptedTypes, file, label, dragLab
                 onChange={handleChange}
             />
             {file ? (
-                <p className="file-name">{file.name}</p>
+                previewUrl ? (
+                    <div className="file-preview">
+                        <img className="drop-zone-preview" src={previewUrl} alt={file.name} />
+                        <p className="file-name">{file.name}</p>
+                        <button className="remove-button" onClick={handleRemove} aria-label="Remove file">Remove</button>
+                    </div>
+                ) : (
+                    <div className="file-preview">
+                        {/* simple file info for non-images */}
+                        <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                            {/* lightweight inline icon to avoid extra deps */}
+                            <span className="file-icon" aria-hidden>📄</span>
+                            <p className="file-name">
+                                {file.name}
+                                <span className="file-size"> ({(file.size/1024).toFixed(1)} KB)</span>
+                            </p>
+                        </div>
+                        <button className="remove-button" onClick={handleRemove} aria-label="Remove file">Remove</button>
+                    </div>
+                )
             ) : (
                 <>
                     <UploadIcon />

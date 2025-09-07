@@ -3,11 +3,12 @@ import React from 'react';
 interface ModalProps {
     isOpen: boolean;
     onClose: () => void;
-    content: string;
+    content?: string;
+    imageSrc?: string;
     title?: string;
 }
 
-export const Modal = ({ isOpen, onClose, content, title = "Markdown Context" }: ModalProps) => {
+export const Modal = ({ isOpen, onClose, content = "", imageSrc, title = "Markdown Context" }: ModalProps) => {
     if (!isOpen) return null;
 
     return (
@@ -18,7 +19,11 @@ export const Modal = ({ isOpen, onClose, content, title = "Markdown Context" }: 
                     <button className="modal-close-button" onClick={onClose} aria-label="Close modal">&times;</button>
                 </div>
                 <div className="modal-body">
-                    <pre><code>{content}</code></pre>
+                    {imageSrc ? (
+                        <img src={imageSrc} alt="Preview" />
+                    ) : (
+                        <pre><code>{content}</code></pre>
+                    )}
                 </div>
             </div>
         </div>

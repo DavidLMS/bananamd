@@ -14,18 +14,18 @@
   align-items: center;
   cursor: pointer;
   transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out;
-  background-color: #f8f9fa;
+  background-color: var(--card-background);
   min-height: 180px;
   position: relative;
 }
 
 .drop-zone.drag-over {
   background-color: var(--pale-yellow);
-  border-color: var(--banana-yellow);
+  border-color: var(--primary);
 }
 
 .drop-zone:hover {
-  border-color: var(--banana-yellow);
+  border-color: var(--primary);
 }
 
 .drop-zone.has-error {
@@ -54,13 +54,15 @@
 .drop-zone-icon {
   width: 48px;
   height: 48px;
-  stroke: var(--light-text);
+  /* Use currentColor so we can theme via color */
+  stroke: currentColor;
+  color: #f8c411;
   margin-bottom: 1rem;
-  transition: stroke 0.2s ease-in-out;
+  transition: color 0.2s ease-in-out;
 }
 
 .drop-zone:hover .drop-zone-icon {
-    stroke: var(--banana-yellow);
+    color: #f8c411; /* keep same tone on hover for consistency */
 }
 
 .drop-zone-text {
@@ -69,8 +71,8 @@
 }
 
 .drop-zone-text span {
-  color: var(--banana-yellow);
-  font-weight: 700;
+  color: #f8c411;
+  font-weight: 800;
 }
 
 .file-name {
@@ -78,6 +80,35 @@
   word-break: break-all;
   padding: 0 1rem;
 }
+.file-size { color: var(--light-text); font-weight: 600; }
+
+.file-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.drop-zone-preview {
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  margin-bottom: 0.5rem;
+}
+
+.remove-button {
+  margin-top: 0.5rem;
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--dark-text);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.remove-button:hover { background: var(--pale-yellow); border-color: var(--primary); }
 
 .error-text {
   color: var(--error-red);
