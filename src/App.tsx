@@ -422,6 +422,22 @@ export const App = () => {
             setMarkdownContent(currentMarkdownContent);
 
             const references: ImageReference[] = [];
+            const fetchImageAsDataUrl = async (url: string): Promise<string | null> => {
+                try {
+                    const res = await fetch(url, { mode: 'cors' });
+                    if (!res.ok) return null;
+                    const blob = await res.blob();
+                    const dataUrl = await new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.onerror = (e) => reject(e);
+                        reader.readAsDataURL(blob);
+                    });
+                    return /^data:image\/(png|jpeg|jpg|gif|webp);base64,/i.test(dataUrl) ? dataUrl : null;
+                } catch {
+                    return null;
+                }
+            };
             const markdownRegex = /!\[([^\]]*)\]\((.*?)\)/g;
             let match;
 
@@ -455,6 +471,18 @@ export const App = () => {
                         else if (extension === 'gif') mimeType = 'image/gif';
                         else if (extension === 'webp') mimeType = 'image/webp';
                         originalImage = `data:${mimeType};base64,${base64Data}`;
+                    }
+                } else {
+                    // Single .md case: if URL is remote or data URL, try to treat as existing
+                    if (/^data:image\//i.test(path)) {
+                        status = 'existing';
+                        originalImage = path;
+                    } else if (/^https?:\/\//i.test(path)) {
+                        const data = await fetchImageAsDataUrl(path);
+                        if (data) {
+                            status = 'existing';
+                            originalImage = data;
+                        }
                     }
                 }
                 references.push({ lineNumber, alt, path, context, status, originalImage, startIndex: matchIndex, matchLength: fullMatch.length, syntax: 'markdown' });
@@ -493,6 +521,17 @@ export const App = () => {
                             else if (extension === 'gif') mimeType = 'image/gif';
                             else if (extension === 'webp') mimeType = 'image/webp';
                             originalImage = `data:${mimeType};base64,${base64Data}`;
+                        }
+                    } else {
+                        if (/^data:image\//i.test(path)) {
+                            status = 'existing';
+                            originalImage = path;
+                        } else if (/^https?:\/\//i.test(path)) {
+                            const data = await fetchImageAsDataUrl(path);
+                            if (data) {
+                                status = 'existing';
+                                originalImage = data;
+                            }
                         }
                     }
                     references.push({ lineNumber, alt, path, context, status, originalImage, startIndex: matchIndex, matchLength: fullMatch.length, syntax: 'html' });
