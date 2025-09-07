@@ -13,8 +13,6 @@
 
 Illustrate Markdown documents and slide decks at speed with Gemini 2.5 Flash Image Preview (aka Nano Banana). Upload a `.md` or a `.zip` with your project, get two high‑quality proposals per image reference, iteratively edit with text, and export a polished package with descriptive filenames and accessible alt text.
 
-> Live demo: https://bananamd.learningwithmachines.com
-
 <p align="center">
     <a href="https://github.com/DavidLMS/bananamd/issues/new?assignees=&labels=bug&projects=&template=bug_report.md&title=%5BBUG%5D">Report Bug</a>
     ·
